@@ -23,6 +23,7 @@ from torch.utils.data import DataLoader, Dataset
 
 BINARYDATASET = ["CelebA", "CelebAHQ", "CelebAMV", "BDDOIA", "BDD100k"]
 MULTICLASSDATASETS = ["ImageNet"]
+REGRESSIONDATASETS = ["squares"]
 
 
 # ============================================================================
@@ -673,7 +674,19 @@ def get_dataset(args):
                 ]
             ),
         )
+    elif args.dataset == "squares":
+        from utils.squares_dataset import SquaresDataSet
 
+        dataset = SquaresDataSet(
+            args.label_query_str,
+            root=args.data_dir,
+            transform=transforms.Compose(
+                [
+                    # transforms.Resize((32, 32)),
+                    transforms.ToTensor(),
+                ]
+            ),
+        )
     else:
         raise NotImplementedError(f"Dataset {args.dataset} not implemented")
 

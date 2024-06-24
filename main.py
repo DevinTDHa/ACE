@@ -47,6 +47,7 @@ from guided_diffusion.image_datasets import (
     get_dataset,
     BINARYDATASET,
     MULTICLASSDATASETS,
+    REGRESSIONDATASETS,
 )
 
 # core imports
@@ -104,6 +105,7 @@ def create_args():
         sampling_dilation=15,  # Dilation size for the mask generation
         # query and target label
         label_query=-1,  # Query label to target
+        label_query_str="ColorA",  # Query label to target
         label_target=-1,  # Target label, useful for MultiClass datasets
         # dataset
         image_size=256,  # Dataset image size
@@ -221,17 +223,32 @@ def main():
 
     dataset = get_dataset(args)
 
-    target = -1
-    if args.label_target != -1:
-        target = (
-            1 - args.label_target if args.dataset in BINARYDATASET else args.label_query
+    if args.dataset not in REGRESSIONDATASETS:
+        target = -1
+        if args.label_target != -1:
+            target = (
+                1 - args.label_target
+                if args.dataset in BINARYDATASET
+                else args.label_query
+            )
+
+        dataset = SlowSingleLabel(target, dataset, args.num_samples)
+
+        dataset = ChunkedDataset(
+            dataset=dataset, chunk=args.chunk, num_chunks=args.chunks
         )
 
-    dataset = SlowSingleLabel(target, dataset, args.num_samples)
-
-    dataset = ChunkedDataset(dataset=dataset, chunk=args.chunk, num_chunks=args.chunks)
-
     print("Images on the dataset:", len(dataset))
+
+    data_is_regression = args.dataset in REGRESSIONDATASETS
+    data_is_binary = args.dataset in BINARYDATASET
+    data_is_multiclass = args.dataset in MULTICLASSDATASETS
+
+    print(
+        "Data is regression:{}, binary:{}, multiclass:{}".format(
+            data_is_regression, data_is_binary, data_is_multiclass
+        )
+    )
 
     loader = data.DataLoader(
         dataset,
@@ -306,16 +323,19 @@ def main():
     dist_fn = get_dist_fn()
 
     main_args = {
-        "predict": joint_classifier
-        if args.attack_joint
-        and not (args.attack_joint_checkpoint or args.attack_joint_shortcut)
-        else classifier,
+        "predict": (
+            joint_classifier
+            if args.attack_joint
+            and not (args.attack_joint_checkpoint or args.attack_joint_shortcut)
+            else classifier
+        ),
         "loss_fn": None,  # we can implement here a custom loss fn
         "dist_fn": dist_fn,
         "eps": args.attack_epsilon / 255,
         "nb_iter": args.attack_iterations,
         "dist_schedule": args.dist_schedule,
-        "binary": args.dataset in BINARYDATASET,
+        "binary": data_is_binary,
+        "regression": data_is_regression,
         "step": args.attack_step / 255,
     }
 
@@ -342,19 +362,20 @@ def main():
     # ========================================
     # get custom function for the forward phase
     # and other variables of interest
+    # ========================================
 
     start_time = time()
     save_imgs = {
-        "pre-explanation": ImageSaver(
-            args.output_path, osp.join(args.exp_name, "pre-explanation")
-        )
-        if args.save_images
-        else None,
-        "explanation": ImageSaver(
-            args.output_path, osp.join(args.exp_name, "explanation")
-        )
-        if args.save_images
-        else None,
+        "pre-explanation": (
+            ImageSaver(args.output_path, osp.join(args.exp_name, "pre-explanation"))
+            if args.save_images
+            else None
+        ),
+        "explanation": (
+            ImageSaver(args.output_path, osp.join(args.exp_name, "explanation"))
+            if args.save_images
+            else None
+        ),
     }
 
     stats = {
@@ -374,7 +395,7 @@ def main():
         "pre-explanation": copy.deepcopy(stats),
     }
 
-    print("Starting Image Generation")
+    print("Starting Image Generation")  # SETUP DONE
     for idx, (indexes, img, lab) in enumerate(loader):
         print(
             f"[Chunks ({args.chunk}+1) / {args.chunks}] {idx} / {len(loader)} | Time: {int(time() - start_time)}s"
@@ -383,24 +404,36 @@ def main():
         img = img.to(dist_util.dev())
         lab = lab.to(
             dist_util.dev(),
-            dtype=torch.float if args.dataset in BINARYDATASET else torch.long,
+            dtype=(
+                torch.float if (data_is_binary or data_is_regression) else torch.long
+            ),
         )
 
         # Initial Classification, no noise included
-        c_log, c_pred = get_prediction(classifier, img, args.dataset in BINARYDATASET)
+        c_log, c_pred = get_prediction(
+            classifier,
+            img,
+            data_is_binary,
+            data_is_regression,
+        )
 
-        # construct target
+        # construct target: Reverse the prediction
         target = None
         if args.label_target != -1:
             target = torch.ones_like(lab) * args.label_target
             target[lab != c_pred] = lab[lab != c_pred]
-        elif args.dataset in BINARYDATASET:
+        elif data_is_binary:
             target = 1 - c_pred
             target[lab != c_pred] = lab[lab != c_pred]
+        elif data_is_regression:
+            target = args.label_target
 
-        acc1, acc5 = accuracy(c_log, lab, binary=args.dataset in BINARYDATASET)
-        stats["clean acc"] += acc1.sum().item()
-        stats["clean acc5"] += acc5.sum().item()
+        if not data_is_regression:
+            acc1, acc5 = accuracy(
+                c_log, lab, binary=data_is_binary
+            )
+            stats["clean acc"] += acc1.sum().item()
+            stats["clean acc5"] += acc5.sum().item()
         stats["n"] += lab.size(0)
 
         # sample image from the noisy_img
@@ -430,14 +463,10 @@ def main():
                 ["pre-explanation", "explanation"], [pe, ce], [pe_mask, ce_mask]
             ):
                 data_log, data_pred = get_prediction(
-                    classifier, data_img, binary=args.dataset in BINARYDATASET
+                    classifier, data_img, binary=data_is_binary
                 )
-                cf, cf5 = accuracy(
-                    data_log, target, binary=args.dataset in BINARYDATASET
-                )
-                un, un5 = accuracy(
-                    data_log, c_pred, binary=args.dataset in BINARYDATASET
-                )
+                cf, cf5 = accuracy(data_log, target, binary=data_is_binary)
+                un, un5 = accuracy(data_log, c_pred, binary=data_is_binary)
                 stats[data_type]["cf"] += cf.sum().item()
                 stats[data_type]["cf5"] += cf5.sum().item()
                 stats[data_type]["untargeted"] += un.size(0) - un.sum().item()

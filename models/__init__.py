@@ -14,7 +14,6 @@ def get_classifier(args):
             [0.5] * 3,
             [0.5] * 3,
         )
-
     elif args.dataset == "CelebAHQ":
         assert args.label_query in [
             20,
@@ -29,7 +28,6 @@ def get_classifier(args):
             torch.load(args.classifier_path, map_location="cpu")["model_state_dict"]
         )
         classifier = Normalizer(classifier, [0.5] * 3, [0.5] * 3)
-
     elif args.dataset in ["BDDOIA", "BDD100k"]:
         classifier = DecisionDensenetModel(
             4, pretrained=False, query_label=args.label_query
@@ -38,7 +36,9 @@ def get_classifier(args):
             torch.load(args.classifier_path, map_location="cpu")["model_state_dict"]
         )
         classifier = Normalizer(classifier, [0.5] * 3, [0.5] * 3)
-
+    elif args.dataset == "squares":
+        from models.lenet import load_lenet
+        classifier = load_lenet(args.classifier_path)
     else:
         classifier = Normalizer(models.resnet50(pretrained=True))
 

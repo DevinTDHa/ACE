@@ -77,6 +77,7 @@ class Attack:
         norm="linf",
         dist_schedule="none",
         binary=False,
+        regression=False
     ):
         """
         :param predict: classification model
@@ -101,6 +102,7 @@ class Attack:
         assert norm in ["linf", "l2"], 'PGD norm must by "linf" or "l2"'
         self.set_dist_schedule(dist_schedule)
         self.binary = binary
+        self.regression = regression
 
     def set_dist_schedule(self, schedule):
         """
@@ -438,10 +440,13 @@ def get_attack(attack, use_checkpoint, use_shortcut=False):
 
         def __init__(self, **kwargs):
             super().__init__(**kwargs)
-            if (self.loss_fn is None) and (not self.binary):
-                self.loss_fn = torch.nn.CrossEntropyLoss()
-            elif (self.loss_fn is None) and self.binary:
-                self.loss_fn = torch.nn.BCEWithLogitsLoss()
+            if self.loss_fn is None:
+                if self.binary:
+                    self.loss_fn = torch.nn.BCEWithLogitsLoss()
+                elif self.regression:
+                    self.loss_fn = torch.nn.MSELoss()
+                else:
+                    self.loss_fn = torch.nn.CrossEntropyLoss()
 
         @torch.no_grad()
         def attack(self, x, y):

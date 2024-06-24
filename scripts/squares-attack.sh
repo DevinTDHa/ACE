@@ -1,7 +1,7 @@
 #!/bin/bash
 
 MODEL_FLAGS="--attention_resolutions 32,16,8 --class_cond False --diffusion_steps 500 --learn_sigma True --noise_schedule linear --num_channels 128 --num_heads 4 --num_res_blocks 2 --resblock_updown True --use_fp16 True --use_scale_shift_norm True"
-SAMPLE_FLAGS="--batch_size 2"
+SAMPLE_FLAGS="--batch_size 1"
 
 Q=ColorA # ColorA or ColorB
 T=1      # desired target color value
@@ -26,7 +26,7 @@ python main.py $MODEL_FLAGS $SAMPLE_FLAGS \
     --attack_joint True \
     --dist_l1 0.001 \
     --timestep_respacing 50 \
-    --sampling_time_fraction 0.1 \
+    --sampling_time_fraction 0.5 \
     --sampling_stochastic True \
     --sampling_inpaint 0.15 \
     --label_query_str $Q \

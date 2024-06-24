@@ -237,6 +237,10 @@ def main():
         dataset = ChunkedDataset(
             dataset=dataset, chunk=args.chunk, num_chunks=args.chunks
         )
+    else:
+        dataset, _ = torch.utils.data.random_split(
+            dataset, [args.num_samples, len(dataset) - args.num_samples]
+        )
 
     print("Images on the dataset:", len(dataset))
 
@@ -428,9 +432,7 @@ def main():
                 target = 1 - c_pred
                 target[lab != c_pred] = lab[lab != c_pred]
 
-            acc1, acc5 = accuracy(
-                c_log, lab, binary=data_is_binary
-            )
+            acc1, acc5 = accuracy(c_log, lab, binary=data_is_binary)
             stats["clean acc"] += acc1.sum().item()
             stats["clean acc5"] += acc5.sum().item()
         else:
@@ -463,14 +465,20 @@ def main():
                 ["pre-explanation", "explanation"], [pe, ce], [pe_mask, ce_mask]
             ):
                 data_log, data_pred = get_prediction(
-                    classifier, data_img, binary=data_is_binary
+                    classifier,
+                    data_img,
+                    binary=data_is_binary,
+                    regression=data_is_regression,
                 )
-                cf, cf5 = accuracy(data_log, target, binary=data_is_binary)
-                un, un5 = accuracy(data_log, c_pred, binary=data_is_binary)
-                stats[data_type]["cf"] += cf.sum().item()
-                stats[data_type]["cf5"] += cf5.sum().item()
-                stats[data_type]["untargeted"] += un.size(0) - un.sum().item()
-                stats[data_type]["untargeted5"] += un5.size(0) - un5.sum().item()
+                if not data_is_regression:
+                    cf, cf5 = accuracy(data_log, target, binary=data_is_binary)
+                    un, un5 = accuracy(data_log, c_pred, binary=data_is_binary)
+                    stats[data_type]["cf"] += cf.sum().item()
+                    stats[data_type]["cf5"] += cf5.sum().item()
+                    stats[data_type]["untargeted"] += un.size(0) - un.sum().item()
+                    stats[data_type]["untargeted5"] += un5.size(0) - un5.sum().item()
+                else:
+                    stats["untargeted"] = data_pred
                 l1 = (
                     (img - data_img)
                     .abs()

@@ -77,7 +77,7 @@ class Attack:
         norm="linf",
         dist_schedule="none",
         binary=False,
-        regression=False
+        regression=False,
     ):
         """
         :param predict: classification model
@@ -162,9 +162,11 @@ class Attack:
         :param y: optional target
         """
         self.targeted = y is not None
+
+        # TODO: adjust here for either ascent or descent
         self.sign = 1 if self.targeted else -1
 
-        if not self.targeted:
+        if not self.targeted and not self.regression:
             with torch.no_grad():
                 y = self.classifier(x).argmax(dim=1)
 
@@ -176,7 +178,6 @@ class Attack:
         Extract gradients of x w.r.t. the loss function operated on y.
         When y was none on perturb, y=f(clean x)
         """
-
         x.requires_grad = True
         out = self.classifier(x)
         l = self.loss_fn(out, y)

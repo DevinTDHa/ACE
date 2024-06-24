@@ -419,22 +419,22 @@ def main():
 
         # construct target: Reverse the prediction
         target = None
-        if args.label_target != -1:
-            target = torch.ones_like(lab) * args.label_target
-            target[lab != c_pred] = lab[lab != c_pred]
-        elif data_is_binary:
-            target = 1 - c_pred
-            target[lab != c_pred] = lab[lab != c_pred]
-        elif data_is_regression:
-            target = args.label_target
-
+        stats["n"] += lab.size(0)
         if not data_is_regression:
+            if args.label_target != -1:
+                target = torch.ones_like(lab) * args.label_target
+                target[lab != c_pred] = lab[lab != c_pred]
+            elif data_is_binary:
+                target = 1 - c_pred
+                target[lab != c_pred] = lab[lab != c_pred]
+
             acc1, acc5 = accuracy(
                 c_log, lab, binary=data_is_binary
             )
             stats["clean acc"] += acc1.sum().item()
             stats["clean acc5"] += acc5.sum().item()
-        stats["n"] += lab.size(0)
+        else:
+            target = torch.ones_like(lab) * args.label_target
 
         # sample image from the noisy_img
         ce, pe, noise, pe_mask = filter_fn(

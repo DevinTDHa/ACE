@@ -14,7 +14,7 @@ CLASSIFIERPATH="/home/ducha/Nextcloud/Uni-Master/Thesis/notebooks/squares/ace/sq
 
 EXPNAME=squares_ace
 
-python main.py $MODEL_FLAGS $SAMPLE_FLAGS \
+debugpy-run main.py $MODEL_FLAGS $SAMPLE_FLAGS \
     --gpu $GPU \
     --num_samples 30 \
     --model_path $MODELPATH \

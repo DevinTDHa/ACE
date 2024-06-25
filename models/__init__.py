@@ -5,6 +5,7 @@ from torchvision import models
 from models.normalizer import Normalizer
 from models.dive.densenet import DiVEDenseNet121
 from models.steex.DecisionDensenetModel import DecisionDensenetModel
+from thesis_utils.models import load_model
 
 
 def get_classifier(args):
@@ -37,8 +38,10 @@ def get_classifier(args):
         )
         classifier = Normalizer(classifier, [0.5] * 3, [0.5] * 3)
     elif args.dataset == "squares":
-        from models.lenet import load_lenet
-        classifier = load_lenet(args.classifier_path)
+        if "classifier_type" in args:
+            classifier = load_model(args.classifier_type, args.classifier_path)
+        else:
+            raise ValueError("classifier_type must be provided for squares dataset")
     else:
         classifier = Normalizer(models.resnet50(pretrained=True))
 

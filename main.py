@@ -80,6 +80,7 @@ def create_args():
         cudnn_deterministic=False,  # setting this to true will slow the computation time but will have identic results when using the checkpoint backwards
         # path args
         model_path="",  # DDPM weights path
+        classifier_type="",  # Classifier type for regression models
         classifier_path="",  # Classifier weights path
         output_path="results",  # Output path
         exp_name="exp",  # Experiment name (will store the results at Output/Results/exp_name)

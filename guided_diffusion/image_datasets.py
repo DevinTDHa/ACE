@@ -130,9 +130,16 @@ class CelebADataset(Dataset):
         query_label=-1,
         normalize=True,
     ):
-        partition_df = pd.read_csv(osp.join(data_dir, 'list_eval_partition.csv'))
+        partition_df = pd.read_csv(
+            osp.join(data_dir, "list_eval_partition.txt"),
+            header=None,
+            names=["image_id", "partition"],
+            delimiter=" ",
+        )
         self.data_dir = data_dir
-        data = pd.read_csv(osp.join(data_dir, 'list_attr_celeba.csv'))
+        data = pd.read_csv(osp.join(data_dir, "list_attr_celeba.txt"), delimiter=r"\s+", skiprows=1)
+        data.index.name = 'image_id'
+        data.reset_index(inplace=True)
 
         if partition == 'train':
             partition = 0

@@ -3,3 +3,9 @@
 pretrained_models
 DiVE-models
 DiVE-DDPM-comp
+
+*png
+.vscode
+*.pt
+*.pth
+*.txt

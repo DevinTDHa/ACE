@@ -448,7 +448,6 @@ def get_attack(attack, use_checkpoint, use_shortcut=False):
             '''
             return x
 
-
     class PGD(BaseAttack):
         '''
         PGD attack
@@ -461,7 +460,6 @@ def get_attack(attack, use_checkpoint, use_shortcut=False):
                 self.loss_fn = torch.nn.CrossEntropyLoss()
             elif (self.loss_fn is None) and self.binary:
                 self.loss_fn = torch.nn.BCEWithLogitsLoss()
-
 
         @torch.no_grad()
         def attack(self, x, y):
@@ -483,13 +481,16 @@ def get_attack(attack, use_checkpoint, use_shortcut=False):
                     confidence = get_regr_confidence(prediction, y)
 
                     self.save_intermediate_img(x_adv[0], i, prediction)
-                    pbar.set_postfix({'confidence': confidence.item(), "regr": prediction.item()})
+                    pbar.set_postfix(
+                        confidence=confidence.item(),
+                        regr=prediction.item(),
+                        max_gpu_GB=torch.cuda.max_memory_reserved() / 1e9,
+                    )
                     if confidence.item() <= self.confidence_threshold:
                         success = True
                         break
 
             return x_adv, success, i
-
 
     class GradientDescent(BaseAttack):
         '''
@@ -517,7 +518,6 @@ def get_attack(attack, use_checkpoint, use_shortcut=False):
                 x_adv = projection_fn(x, x_adv)
 
             return x_adv
-
 
     class CW(BaseAttack):
         '''

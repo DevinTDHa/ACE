@@ -9,6 +9,7 @@ import numpy as np
 import threading
 
 from thesis_utils.metrics import get_regr_confidence
+from thesis_utils.file_utils import save_img_threaded
 
 
 # =======================================================
@@ -36,22 +37,6 @@ class JointClassifierDDPM(torch.nn.Module):
         self.stochastic = stochastic
         self.noise_fn = torch.randn_like if stochastic else torch.zeros_like
         self.index = 0
-
-    # def get_idx_dir(self):
-    #     path = f"noises/{self.index:04d}"
-    #     os.makedirs(path, exist_ok=True)
-    #     return path
-
-    # def save_noised(self, x, t, stochastic):
-    #     def save_image_thread(x, t, path):
-    #         # Use PyTorch to save the tensor as an image
-    #         x = (x * 0.5) + 0.5
-    #         stochastic_str = "_stochastic" if stochastic else ""
-    #         save_image(x, f"{path}/noised_t{t:04d}{stochastic_str}.png")
-
-    #     path = self.get_idx_dir()
-    #     thread = threading.Thread(target=save_image_thread, args=(x, t, path))
-    #     thread.start()
 
     def forward(self, x):
 
@@ -128,7 +113,7 @@ class Attack():
         - Choses if the attack is untargetted or
           targetted (done via perturb fn)
     '''
-    def __init__(self, predict, loss_fn, dist_fn, confidence_threshold,
+    def __init__(self, predict, loss_fn, dist_fn, confidence_threshold, steps_dir,
                  eps, step=1 / 255, nb_iter=100,
                  norm='linf', dist_schedule='none',
                  binary=False):
@@ -156,6 +141,23 @@ class Attack():
         self.set_dist_schedule(dist_schedule)
         self.binary = binary
         self.confidence_threshold = confidence_threshold
+        self.steps_dir = steps_dir
+        self.current_image = ""  # for intermediate images
+
+    def save_intermediate_img(self, x, n_iter, y_pred):
+        """
+        Saves a single image intermediate images for the attack
+        """
+        assert len(x.shape) == 3, "x must be a single image"
+
+        img_idx_path = os.path.join(self.steps_dir, self.current_image)
+
+        y_pred_formatted = f"{y_pred.item():.3e}"
+        img_path = os.path.join(
+            img_idx_path, f"niter={n_iter:04d}_y={y_pred_formatted}.png"
+        )
+
+        save_img_threaded(x, img_path)
 
     def set_dist_schedule(self, schedule):
         '''
@@ -480,6 +482,7 @@ def get_attack(attack, use_checkpoint, use_shortcut=False):
 
                     confidence = get_regr_confidence(prediction, y)
 
+                    self.save_intermediate_img(x_adv[0], i, prediction)
                     pbar.set_postfix({'confidence': confidence.item(), "regr": prediction.item()})
                     if confidence.item() <= self.confidence_threshold:
                         success = True

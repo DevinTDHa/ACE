@@ -350,7 +350,7 @@ def main() -> None:
 
     dist_fn = get_dist_fn()
 
-    main_args = {
+    attack_args = {
         "predict": (
             joint_classifier
             if args.attack_joint
@@ -365,6 +365,7 @@ def main() -> None:
         "binary": False,
         "step": args.attack_step / 255,
         "confidence_threshold": args.confidence_threshold,
+        "steps_dir": osp.join(result_dir, "steps"),
     }
 
     attack = get_attack(
@@ -382,10 +383,10 @@ def main() -> None:
             steps=respaced_steps,
             stochastic=args.sampling_stochastic,
             backward_steps=args.attack_checkpoint_backward_steps,
-            **main_args,
+            **attack_args,
         )
     else:
-        attack = attack(**main_args)  # Constructor
+        attack = attack(**attack_args)  # Constructor
 
     dataset, meta = get_data(args)
 
@@ -415,6 +416,9 @@ def main() -> None:
 
             pbar.set_postfix_str(f"Processing: {f}")
 
+            # Hack for intermediate images
+            image_name = f.split("/")[-1].split(".")[0]
+            attack.current_image = image_name
             # sample image from the noisy_img
             # DHA: 1. Extract grads with JointClassifierDDPM.forward and perform PGD
             # DHA: 2. Create inpainting for final CE

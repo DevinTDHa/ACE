@@ -38,14 +38,16 @@
 # sampling_dilation=15,  # Dilation size for the mask generation
 # # QUERY AND TARGET LABEL
 # # DATASET
+MODEL_FLAGS="--attention_resolutions 32,16,8 --class_cond False --diffusion_steps 500 --learn_sigma True --noise_schedule linear --num_channels 128 --num_heads 4 --num_res_blocks 2 --resblock_updown True --use_fp16 True --use_scale_shift_norm True"
 MODEL_PATH="/home/tha/ACE/pretrained/ddpm-celeba.pt"
 RMODEL_PATH="/home/tha/master-thesis-xai/thesis_utils/scripts/train/runs/imdb_clean-128/version_0/checkpoints/last.ckpt"
 RORACLE_PATH="/home/tha/master-thesis-xai/thesis_utils/scripts/train/runs/imdb_clean_oracle-128/version_0/checkpoints/last.ckpt"
-TARGET=0.8
-STOP_AT=0.8
-CONFIDENCE_THRESHOLD=0.05
+TARGET="0.8"
+STOP_AT="0.8"
+CONFIDENCE_THRESHOLD="0.05"
 IMAGE_FOLDER="/home/tha/datasets/imdb-wiki-clean-samples"
-IMAGE_SIZE=128
+IMAGE_SIZE="128"
+ATACK_STEP=2.0
 
 OUTPUT_PATH="ace_results/imdb_ace_t=$TARGET"
 
@@ -54,13 +56,14 @@ apptainer run \
     -B /home/space/datasets:/home/space/datasets \
     --nv \
     ~/apptainers/thesis.sif \
-    python main_regression.py \
-    --model_path $MODEL_PATH \
-    --rmodel_path $RMODEL_PATH \
-    --roracle_path $RORACLE_PATH \
-    --target $TARGET \
-    --stop_at $STOP_AT \
-    --confidence_threshold $CONFIDENCE_THRESHOLD \
-    --image_folder $IMAGE_FOLDER \
-    --image_size $IMAGE_SIZE \
-    --output_path $OUTPUT_PATH
+    python main_regression.py $MODEL_FLAGS \
+    --model_path=$MODEL_PATH \
+    --rmodel_path=$RMODEL_PATH \
+    --roracle_path=$RORACLE_PATH \
+    --attack_step=$ATACK_STEP \
+    --target=$TARGET \
+    --stop_at=$STOP_AT \
+    --confidence_threshold=$CONFIDENCE_THRESHOLD \
+    --image_folder=$IMAGE_FOLDER \
+    --image_size=$IMAGE_SIZE \
+    --output_path=$OUTPUT_PATH --timestep_respacing 50

@@ -49,18 +49,6 @@ from thesis_utils.models import load_resnet
 # =======================================================
 # =======================================================
 
-
-def handle_exception(exc_type, exc_value, exc_traceback):
-    if issubclass(exc_type, KeyboardInterrupt):
-        sys.__excepthook__(exc_type, exc_value, exc_traceback)
-        return
-    print("Exception occurred:", exc_value)
-    pdb.post_mortem(exc_traceback)
-
-
-sys.excepthook = handle_exception
-
-
 def create_args():
     defaults = dict(
         clip_denoised=True,  # Clipping noise
@@ -75,7 +63,7 @@ def create_args():
         # attack args
         seed=0,  # Random seed
         attack_method="PGD",  # Attack method (currently 'PGD', 'C&W', 'GD' and 'None' supported)
-        attack_iterations=50,  # Attack iterations updates
+        attack_iterations=100,  # Attack iterations updates
         attack_epsilon=255,  # L inf epsilon bound (will be devided by 255)
         attack_step=1.0,  # Attack update step (will be devided by 255)
         attack_joint=True,  # Set to false to generate adversarial attacks
@@ -227,6 +215,14 @@ def filter_fn(
 
     return ce, pe, noise_x, mask, success, steps_done
 
+@torch.no_grad()
+def to_ddpm_colorspace(x):
+    return (x - 0.5) / 0.5
+
+@torch.no_grad()
+def to_normal_colorspace(x):
+    return x * 0.5 + 0.5
+
 
 # =======================================================
 # =======================================================
@@ -259,9 +255,9 @@ def get_data(args):
 
         return meta
 
-    compose = default_transforms(args.size, ddpm=True)
+    compose = default_transforms(args.image_size)
     dataset = ImageFolderDataset(
-        folder=args.image_folder, size=args.size, transform=compose
+        folder=args.image_folder, size=args.image_size, transform=compose
     )
 
     meta_path = os.path.join(args.image_folder, "data.csv")
@@ -327,6 +323,7 @@ def main() -> None:
 
     def get_dist_fn():
 
+        any_loss = False
         if args.dist_l2 != 0.0:
             l2_loss = (
                 lambda x, x_adv: args.dist_l2
@@ -408,13 +405,15 @@ def main() -> None:
     os.makedirs(noise_path, exist_ok=True)
     os.makedirs(mask_path, exist_ok=True)
 
+    target = torch.Tensor([[args.target]]).to(dist_util.dev())
     with tqdm(range(num_samples), desc="Running ACE") as pbar:
         for i in pbar:
-            pbar.set_postfix_str(f"Processing: {f}")
 
             f, x = dataset[i]
             x = x.unsqueeze(0).to(dist_util.dev())
             x_reconstructed, y_initial = joint_classifier.initial(x)
+
+            pbar.set_postfix_str(f"Processing: {f}")
 
             # sample image from the noisy_img
             # DHA: 1. Extract grads with JointClassifierDDPM.forward and perform PGD
@@ -426,18 +425,21 @@ def main() -> None:
                 steps=respaced_steps,
                 x=x.to(dist_util.dev()),
                 stochastic=args.sampling_stochastic,
-                target=args.target,
+                target=target,
                 inpaint=args.sampling_inpaint,
                 dilation=args.sampling_dilation,
             )
 
             with torch.no_grad():
                 y_final = joint_classifier.classifier(ce).item()
+
+                x = x.detach().cpu()
+                x_prime = ce.detach().cpu()
                 cf_result = CFResult(
                     image_path=f,
                     x=x,
                     x_reconstructed=x_reconstructed,
-                    x_prime=ce,
+                    x_prime=x_prime,
                     y_target=args.target,
                     y_initial_pred=y_initial,
                     y_final_pred=y_final,
@@ -445,7 +447,7 @@ def main() -> None:
                     steps=steps_done,
                 )
                 if meta is not None:
-                    y_true = meta[cf_result.image_name_base]
+                    y_true = meta[cf_result.image_name]
                     cf_result.update_y_true_initial(y_true)
                 diffeocf_results.append(cf_result)
 
@@ -463,7 +465,7 @@ def main() -> None:
     oracle = load_resnet(args.roracle_path).to("cuda")
     update_results_oracle(oracle, diffeocf_results, args.confidence_threshold)
 
-    save_cf_results(diffeocf_results, args.result_dir)
+    save_cf_results(diffeocf_results, args.output_path)
 
 
 if __name__ == "__main__":

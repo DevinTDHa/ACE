@@ -9,3 +9,5 @@ DiVE-DDPM-comp
 *.pt
 *.pth
 *.txt
+*.json
+*.jpg

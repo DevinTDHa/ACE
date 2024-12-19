@@ -37,21 +37,21 @@ class JointClassifierDDPM(torch.nn.Module):
         self.noise_fn = torch.randn_like if stochastic else torch.zeros_like
         self.index = 0
 
-    def get_idx_dir(self):
-        path = f"noises/{self.index:04d}"
-        os.makedirs(path, exist_ok=True)
-        return path
+    # def get_idx_dir(self):
+    #     path = f"noises/{self.index:04d}"
+    #     os.makedirs(path, exist_ok=True)
+    #     return path
 
-    def save_noised(self, x, t, stochastic):
-        def save_image_thread(x, t, path):
-            # Use PyTorch to save the tensor as an image
-            x = (x * 0.5) + 0.5
-            stochastic_str = "_stochastic" if stochastic else ""
-            save_image(x, f"{path}/noised_t{t:04d}{stochastic_str}.png")
+    # def save_noised(self, x, t, stochastic):
+    #     def save_image_thread(x, t, path):
+    #         # Use PyTorch to save the tensor as an image
+    #         x = (x * 0.5) + 0.5
+    #         stochastic_str = "_stochastic" if stochastic else ""
+    #         save_image(x, f"{path}/noised_t{t:04d}{stochastic_str}.png")
 
-        path = self.get_idx_dir()
-        thread = threading.Thread(target=save_image_thread, args=(x, t, path))
-        thread.start()
+    #     path = self.get_idx_dir()
+    #     thread = threading.Thread(target=save_image_thread, args=(x, t, path))
+    #     thread.start()
 
     def forward(self, x):
 
@@ -76,7 +76,7 @@ class JointClassifierDDPM(torch.nn.Module):
                 if self.stochastic:
                     x += torch.exp(0.5 * out["log_variance"]) * self.noise_fn(x)
 
-            self.save_noised(x, t[0].item(), self.stochastic)
+            # self.save_noised(x, t[0].item(), self.stochastic)
 
         x = (x * 0.5) + 0.5
 
@@ -88,6 +88,7 @@ class JointClassifierDDPM(torch.nn.Module):
     def initial(self, x):
         timesteps = list(range(self.steps))[::-1]
 
+        x = x.clone().detach()
         initial_pred = self.classifier(x)
 
         x = (x - 0.5) / 0.5
@@ -127,7 +128,7 @@ class Attack():
         - Choses if the attack is untargetted or
           targetted (done via perturb fn)
     '''
-    def __init__(self, predict, loss_fn, dist_fn,
+    def __init__(self, predict, loss_fn, dist_fn, confidence_threshold,
                  eps, step=1 / 255, nb_iter=100,
                  norm='linf', dist_schedule='none',
                  binary=False):
@@ -154,6 +155,7 @@ class Attack():
         assert norm in ['linf', 'l2'], 'PGD norm must by "linf" or "l2"'
         self.set_dist_schedule(dist_schedule)
         self.binary = binary
+        self.confidence_threshold = confidence_threshold
 
     def set_dist_schedule(self, schedule):
         '''
@@ -458,7 +460,6 @@ def get_attack(attack, use_checkpoint, use_shortcut=False):
             elif (self.loss_fn is None) and self.binary:
                 self.loss_fn = torch.nn.BCEWithLogitsLoss()
 
-            self.confidence_threshold = kwargs['confidence_threshold']
 
         @torch.no_grad()
         def attack(self, x, y):
@@ -470,7 +471,7 @@ def get_attack(attack, use_checkpoint, use_shortcut=False):
             projection_fn = self.linf_norm_proj if self.norm == 'linf' else self.l2_norm_proj        
 
             success = False
-            with tqdm(total=self.nb_iter, desc='PGD Attacking') as pbar:
+            with tqdm(range(self.nb_iter), desc='PGD Attacking') as pbar:
                 for i in pbar:
                     grad, prediction = self.extract_grads(x_adv, y)
                     grad = self.sign * grad + self.extract_dist_grads(i, x, x_adv.clone().detach())

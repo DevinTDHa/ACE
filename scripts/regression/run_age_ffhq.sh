@@ -52,6 +52,7 @@ STOP_AT="0.8"
 NAME="ffhq_ace_t=$TARGET"
 OUTPUT_PATH="ace_results/$NAME"
 
+echo "Runnning $NAME"
 # Run the Python script with the arguments
 apptainer run \
     -B /home/space/datasets:/home/space/datasets \
@@ -76,6 +77,7 @@ STOP_AT="0.1"
 NAME="ffhq_ace_t=$TARGET"
 OUTPUT_PATH="ace_results/$NAME"
 
+echo "Runnning $NAME"
 # Run the Python script with the arguments
 apptainer run \
     -B /home/space/datasets:/home/space/datasets \
@@ -95,4 +97,6 @@ apptainer run \
     --output_path=$OUTPUT_PATH \
     >logs/$NAME.log 2>&1 &
 
+
 # TODO Untargeted
+wait

@@ -52,6 +52,7 @@ STOP_AT="0.8"
 NAME="imdb_ace_t=$TARGET"
 OUTPUT_PATH="ace_results/$NAME"
 
+echo "Runnning $NAME"
 # Run the Python script with the arguments
 apptainer run \
     -B /home/space/datasets:/home/space/datasets \
@@ -69,13 +70,14 @@ apptainer run \
     --image_size=$IMAGE_SIZE \
     --timestep_respacing 50 \
     --output_path=$OUTPUT_PATH \
-    >logs/$OUTPUT_PATH.log 2>&1 &
+    >logs/$NAME.log 2>&1 &
 
 TARGET="0.1"
 STOP_AT="0.1"
 NAME="imdb_ace_t=$TARGET"
 OUTPUT_PATH="ace_results/$NAME"
 
+echo "Runnning $NAME"
 # Run the Python script with the arguments
 apptainer run \
     -B /home/space/datasets:/home/space/datasets \
@@ -93,4 +95,7 @@ apptainer run \
     --image_size=$IMAGE_SIZE \
     --timestep_respacing 50 \
     --output_path=$OUTPUT_PATH \
-    >logs/$OUTPUT_PATH.log 2>&1 &
+    >logs/$NAME.log 2>&1 &
+
+# TODO Untargeted
+wait

@@ -55,7 +55,7 @@ def create_args():
         batch_size=16,  # Batch size
         gpu="0",  # GPU index, should only be 1 gpu
         save_images=False,  # Saving all images
-        num_samples=1,  # useful to sample few examples
+        num_samples=10_000,  # useful to sample few examples
         cudnn_deterministic=False,  # setting this to true will slow the computation time but will have identic results when using the checkpoint backwards
         # path args
         model_path="",  # DDPM weights path

@@ -2,7 +2,7 @@
 #SBATCH --job-name=ace_imdb
 #SBATCH --partition=gpu-2d
 #SBATCH --gpus-per-node=1
-#SBATCH --ntasks-per-node=2
+#SBATCH --ntasks-per-node=4
 #SBATCH --constraint=80gb
 #SBATCH --output=logs/job-%x-%j.out
 #SBATCH --chdir=/home/tha/ACE/
@@ -42,14 +42,15 @@ MODEL_FLAGS="--attention_resolutions 32,16,8 --class_cond False --diffusion_step
 MODEL_PATH="/home/tha/ACE/pretrained/ddpm-celeba.pt"
 RMODEL_PATH="/home/tha/master-thesis-xai/thesis_utils/scripts/train/runs/imdb_clean-128/version_0/checkpoints/last.ckpt"
 RORACLE_PATH="/home/tha/master-thesis-xai/thesis_utils/scripts/train/runs/imdb_clean_oracle-128/version_0/checkpoints/last.ckpt"
-STOP_AT="0.8"
 CONFIDENCE_THRESHOLD="0.05"
 IMAGE_FOLDER="/home/tha/datasets/imdb-wiki-clean-samples"
 IMAGE_SIZE="128"
-ATACK_STEP=2.0
+ATACK_STEP=1.0
 
 TARGET="0.8"
-OUTPUT_PATH="ace_results/imdb_ace_t=$TARGET"
+STOP_AT="0.8"
+NAME="imdb_ace_t=$TARGET"
+OUTPUT_PATH="ace_results/$NAME"
 
 # Run the Python script with the arguments
 apptainer run \
@@ -67,4 +68,29 @@ apptainer run \
     --image_folder=$IMAGE_FOLDER \
     --image_size=$IMAGE_SIZE \
     --timestep_respacing 50 \
-    --output_path=$OUTPUT_PATH 
+    --output_path=$OUTPUT_PATH \
+    >logs/$OUTPUT_PATH.log 2>&1 &
+
+TARGET="0.1"
+STOP_AT="0.1"
+NAME="imdb_ace_t=$TARGET"
+OUTPUT_PATH="ace_results/$NAME"
+
+# Run the Python script with the arguments
+apptainer run \
+    -B /home/space/datasets:/home/space/datasets \
+    --nv \
+    ~/apptainers/thesis.sif \
+    python main_regression.py $MODEL_FLAGS \
+    --model_path=$MODEL_PATH \
+    --rmodel_path=$RMODEL_PATH \
+    --roracle_path=$RORACLE_PATH \
+    --attack_step=$ATACK_STEP \
+    --target=$TARGET \
+    --stop_at=$STOP_AT \
+    --confidence_threshold=$CONFIDENCE_THRESHOLD \
+    --image_folder=$IMAGE_FOLDER \
+    --image_size=$IMAGE_SIZE \
+    --timestep_respacing 50 \
+    --output_path=$OUTPUT_PATH \
+    >logs/$OUTPUT_PATH.log 2>&1 &

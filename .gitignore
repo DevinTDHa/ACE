@@ -11,3 +11,5 @@ DiVE-DDPM-comp
 *.txt
 *.json
 *.jpg
+logs
+*.log

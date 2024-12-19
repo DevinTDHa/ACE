@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=ace_imdb
-#SBATCH --partition=gpu-5h
+#SBATCH --partition=gpu-2d
 #SBATCH --gpus-per-node=1
 #SBATCH --ntasks-per-node=2
 #SBATCH --constraint=80gb
@@ -42,13 +42,13 @@ MODEL_FLAGS="--attention_resolutions 32,16,8 --class_cond False --diffusion_step
 MODEL_PATH="/home/tha/ACE/pretrained/ddpm-celeba.pt"
 RMODEL_PATH="/home/tha/master-thesis-xai/thesis_utils/scripts/train/runs/imdb_clean-128/version_0/checkpoints/last.ckpt"
 RORACLE_PATH="/home/tha/master-thesis-xai/thesis_utils/scripts/train/runs/imdb_clean_oracle-128/version_0/checkpoints/last.ckpt"
-TARGET="0.8"
 STOP_AT="0.8"
 CONFIDENCE_THRESHOLD="0.05"
 IMAGE_FOLDER="/home/tha/datasets/imdb-wiki-clean-samples"
 IMAGE_SIZE="128"
 ATACK_STEP=2.0
 
+TARGET="0.8"
 OUTPUT_PATH="ace_results/imdb_ace_t=$TARGET"
 
 # Run the Python script with the arguments
@@ -66,4 +66,5 @@ apptainer run \
     --confidence_threshold=$CONFIDENCE_THRESHOLD \
     --image_folder=$IMAGE_FOLDER \
     --image_size=$IMAGE_SIZE \
-    --output_path=$OUTPUT_PATH --timestep_respacing 50
+    --timestep_respacing 50 \
+    --output_path=$OUTPUT_PATH 

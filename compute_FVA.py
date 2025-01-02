@@ -25,7 +25,9 @@ class CFDataset():
         self.path = path
         self.exp_name = exp_name
         for CL, CF in itertools.product(['CC', 'IC'], ['CCF']):
-            self.images += [(CL, CF, I) for I in os.listdir(osp.join(path, 'Results', self.exp_name, CL, CF, 'CF'))]
+            for I in os.listdir(osp.join(path, 'Results', self.exp_name, CL, CF, 'CF')):
+                if I.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif')):
+                    self.images.append((CL, CF, I))
 
     def __len__(self):
         return len(self.images)
@@ -62,6 +64,7 @@ def compute_FVA(oracle,
                 path,
                 exp_name,
                 batch_size):
+    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
     dataset = CFDataset(path, exp_name)
 

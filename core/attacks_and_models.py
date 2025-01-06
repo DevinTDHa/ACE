@@ -116,7 +116,7 @@ class Attack():
     def __init__(self, predict, loss_fn, dist_fn, confidence_threshold, steps_dir,
                  eps, step=1 / 255, nb_iter=100,
                  norm='linf', dist_schedule='none',
-                 binary=False):
+                 binary=False, predictor: torch.nn.Module = None):
         '''
         :param predict: classification model
         :param loss_fn: loss function
@@ -129,6 +129,8 @@ class Attack():
         :param binary: flag to tell if the model is binary of multi class
         '''
         self.predict = predict
+        assert predictor is not None, 'Parameter predictor must be defined for regression version.'
+        self.predictor: torch.nn.Module = predictor
         self.loss_fn = loss_fn
         self.dist_fn = dist_fn
 
@@ -478,7 +480,8 @@ def get_attack(attack, use_checkpoint, use_shortcut=False):
                     x_adv -= grad.sign() * self.step
                     x_adv = projection_fn(x, x_adv)
 
-                    confidence = get_regr_confidence(prediction, y)
+                    y_hat = self.predictor(x_adv)
+                    confidence = get_regr_confidence(y, y_hat)
 
                     self.save_intermediate_img(x_adv[0], i, prediction)
                     pbar.set_postfix(
@@ -571,6 +574,8 @@ def get_attack(attack, use_checkpoint, use_shortcut=False):
     elif attack == 'CW':
         print('** Warning. C&W attack has no epsilon bound (except for [0, 1])!! **')
         return CW
+    elif attack == 'Adam':
+        return AdamAttack
     else:
         raise NotImplementedError(f'Attack {attack} is not implemented.')
 
@@ -599,3 +604,69 @@ class MultiClassCW(torch.nn.Module):
         wo_t[list(range(len(target))), target] = -float('inf')
         F_c = wo_t.max(dim=1)[0]
         return self.relu(F_c - F_t).sum()
+
+
+# =======================================================
+# Custom Attacks
+# =======================================================
+class AdamAttack(Attack):
+    """
+    Adam based attack
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        if self.loss_fn == "mse":
+            self.loss_fn = torch.nn.MSELoss()  # Default Regression loss
+        if (self.loss_fn is None) and (not self.binary):
+            self.loss_fn = torch.nn.CrossEntropyLoss()
+        elif (self.loss_fn is None) and self.binary:
+            self.loss_fn = torch.nn.BCEWithLogitsLoss()
+
+        if self.dist_fn is None:
+            self.dist_fn = lambda x, y: 0
+
+    @torch.no_grad()
+    def attack(self, x, y):
+        """
+        Main attack algorithm
+
+        :param x: The input tensor.
+        :param y: The target labels tensor.
+        :param img_idxs: The indices of the images (used to save intermediate attack images).
+        """
+
+        x_adv = x.clone().detach()
+        x_adv.requires_grad = True
+
+        success = False
+
+        optimizer = torch.optim.Adam([x_adv], lr=self.step)
+        with tqdm(range(self.nb_iter), desc="Adam Attacking") as pbar:
+            for i in pbar:
+                optimizer.zero_grad()
+                # Filter Function -> Classifier loss + Distance function
+                with torch.enable_grad():
+                    prediction = self.predict(x_adv)
+                    loss = self.loss_fn(prediction, y)
+
+                    dist_x = self.dist_fn(x, x_adv)
+                    total_loss = loss + dist_x
+
+                    total_loss.backward()
+                    optimizer.step()
+
+                y_hat = self.predictor(x_adv)
+                confidence = get_regr_confidence(y, y_hat)
+
+                self.save_intermediate_img(x_adv[0], i, prediction)
+                pbar.set_postfix(
+                    confidence=confidence.item(),
+                    regr=prediction.item(),
+                    max_gpu_GB=torch.cuda.max_memory_reserved() / 1e9,
+                )
+                if confidence.item() <= self.confidence_threshold:
+                    success = True
+                    break
+
+        return x_adv, success, i

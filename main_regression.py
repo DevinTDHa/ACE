@@ -62,7 +62,7 @@ def create_args():
         exp_name="exp",  # Experiment name (will store the results at Output/Results/exp_name)
         # attack args
         seed=0,  # Random seed
-        attack_method="PGD",  # Attack method (currently 'PGD', 'C&W', 'GD' and 'None' supported)
+        attack_method="PGD",  # Attack method (currently 'PGD', 'C&W', 'GD' and 'Adam' supported)
         attack_iterations=100,  # Attack iterations updates
         attack_epsilon=255,  # L inf epsilon bound (will be devided by 255)
         attack_step=1.0,  # Attack update step (will be devided by 255)
@@ -357,6 +357,7 @@ def main() -> None:
             and not (args.attack_joint_checkpoint or args.attack_joint_shortcut)
             else classifier
         ),
+        "predictor": classifier,
         "loss_fn": "mse",  # we can implement here a custom loss fn
         "dist_fn": dist_fn,
         "eps": args.attack_epsilon / 255,

@@ -47,17 +47,20 @@ IMAGE_FOLDER="/data/CelebAMask-HQ"
 IMAGE_SIZE="256"
 
 # Attack parameters
-if [ "$#" -gt 4 ]; then
-    echo "Usage: $0 <attack_method=PGD> <attack_step=1.0> <dist_l1=0.0> <dist_l2=0.0>"
+if [ "$#" -gt 1 ]; then
+    echo "Usage: $0 <attack_method=PGD>"
     exit 1
 fi
 
 ATTACK_METHOD=${1:-PGD}
-ATACK_STEP=${2:-1.0}
-DIST_L1=${3:-0.0} # Dist does not work well, no real results if enabled
-DIST_L2=${4:-0.0}
+NUM_SAMPLES=2
 
-NUM_SAMPLES=20
+# ---------------- No dist ----------------
+ATACK_STEP=1.0
+DIST_L1=0.0
+DIST_L2=0.0
+SAMPLING_INPAINT=0.15
+
 NAME="CelebaHQ_FR-method=${ATTACK_METHOD}_step=${ATACK_STEP}_dist_l1=${DIST_L1}_dist_l2=${DIST_L2}"
 OUTPUT_PATH="ace_results/$NAME"
 
@@ -85,4 +88,82 @@ apptainer run \
     --dist_l1=$DIST_L1 \
     --dist_l2=$DIST_L2 \
     --timestep_respacing=25 \
-    --sampling_time_fraction=0.2
+    --sampling_inpaint=$SAMPLING_INPAINT \
+    --sampling_time_fraction=0.2 \
+    >logs/"$NAME".log 2>&1 &
+
+# ---------------- L1 ----------------
+ATACK_STEP=1.0
+DIST_L1=0.001
+DIST_L2=0.0
+SAMPLING_INPAINT=0.15
+
+NAME="CelebaHQ_FR-method=${ATTACK_METHOD}_step=${ATACK_STEP}_dist_l1=${DIST_L1}_dist_l2=${DIST_L2}"
+OUTPUT_PATH="ace_results/$NAME"
+
+echo "Runnning $NAME"
+# Run the Python script with the arguments
+apptainer run \
+    -B /home/space/datasets:/home/space/datasets \
+    -B /home/space/datasets-sqfs/CelebAMask-HQ.sqfs:/data/CelebAMask-HQ:image-src=/ \
+    --nv \
+    ~/apptainers/thesis.sif \
+    python main_regression_celebahq.py $MODEL_FLAGS \
+    --model_path=$MODEL_PATH \
+    --rmodel_path=$RMODEL_PATH \
+    --roracle_path=$RORACLE_PATH \
+    --attack_step=$ATACK_STEP \
+    --confidence_threshold=$CONFIDENCE_THRESHOLD \
+    --image_folder=$IMAGE_FOLDER \
+    --image_size=$IMAGE_SIZE \
+    --output_path=$OUTPUT_PATH \
+    --num_samples=$NUM_SAMPLES \
+    --exp_name=$NAME \
+    --attack_method=$ATTACK_METHOD \
+    --attack_iterations=50 \
+    --attack_joint=True \
+    --dist_l1=$DIST_L1 \
+    --dist_l2=$DIST_L2 \
+    --timestep_respacing=25 \
+    --sampling_inpaint=$SAMPLING_INPAINT \
+    --sampling_time_fraction=0.2 \
+    >logs/"$NAME".log 2>&1 &
+
+# ---------------- L2 ----------------
+ATACK_STEP=1.0
+DIST_L1=0.0
+DIST_L2=0.1
+SAMPLING_INPAINT=0.05
+
+NAME="CelebaHQ_FR-method=${ATTACK_METHOD}_step=${ATACK_STEP}_dist_l1=${DIST_L1}_dist_l2=${DIST_L2}"
+OUTPUT_PATH="ace_results/$NAME"
+
+echo "Runnning $NAME"
+# Run the Python script with the arguments
+apptainer run \
+    -B /home/space/datasets:/home/space/datasets \
+    -B /home/space/datasets-sqfs/CelebAMask-HQ.sqfs:/data/CelebAMask-HQ:image-src=/ \
+    --nv \
+    ~/apptainers/thesis.sif \
+    python main_regression_celebahq.py $MODEL_FLAGS \
+    --model_path=$MODEL_PATH \
+    --rmodel_path=$RMODEL_PATH \
+    --roracle_path=$RORACLE_PATH \
+    --attack_step=$ATACK_STEP \
+    --confidence_threshold=$CONFIDENCE_THRESHOLD \
+    --image_folder=$IMAGE_FOLDER \
+    --image_size=$IMAGE_SIZE \
+    --output_path=$OUTPUT_PATH \
+    --num_samples=$NUM_SAMPLES \
+    --exp_name=$NAME \
+    --attack_method=$ATTACK_METHOD \
+    --attack_iterations=50 \
+    --attack_joint=True \
+    --dist_l1=$DIST_L1 \
+    --dist_l2=$DIST_L2 \
+    --timestep_respacing=25 \
+    --sampling_inpaint=$SAMPLING_INPAINT \
+    --sampling_time_fraction=0.2 \
+    >logs/"$NAME".log 2>&1 &
+
+wait

@@ -649,7 +649,6 @@ class AdamAttack(Attack):
                 with torch.enable_grad():
                     prediction = self.predict(x_adv)
                     loss = self.loss_fn(prediction, y)
-
                     dist_x = self.dist_fn(x, x_adv)
                     total_loss = loss + dist_x
 
@@ -663,6 +662,7 @@ class AdamAttack(Attack):
                 pbar.set_postfix(
                     confidence=confidence.item(),
                     regr=prediction.item(),
+                    dist=dist_x.item() if dist_x != 0 else 0,
                     max_gpu_GB=torch.cuda.max_memory_reserved() / 1e9,
                 )
                 if confidence.item() <= self.confidence_threshold:

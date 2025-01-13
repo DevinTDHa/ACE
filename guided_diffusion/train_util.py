@@ -15,6 +15,8 @@ from .nn import update_ema
 from .resample import LossAwareSampler, UniformSampler
 from .sample_utils import load_from_DDP_model
 
+from tqdm import tqdm
+
 # For ImageNet experiments, this was a good default value.
 # We found that the lg_loss_scale quickly climbed to
 # 20-21 within the first ~1K steps of training.
@@ -126,7 +128,7 @@ class TrainLoop:
                         th.load(resume_checkpoint, map_location=dist_util.dev())
                     )
                 )
-                print('done')
+                print("done")
 
         dist_util.sync_params(self.model.parameters())
 
@@ -145,7 +147,7 @@ class TrainLoop:
                     th.load(ema_checkpoint, map_location=dist_util.dev())
                 )
                 ema_params = self.mp_trainer.state_dict_to_master_params(state_dict)
-                print('done')
+                print("done")
 
         dist_util.sync_params(ema_params)
         return ema_params
@@ -163,33 +165,39 @@ class TrainLoop:
             self.opt.load_state_dict(state_dict)
 
     def run_loop(self):
-        print('Running training loop')
-        while (
-            not self.lr_anneal_steps
-            or self.step + self.resume_step < self.lr_anneal_steps
-        ):
-            batch, cond = next(self.data)
-            self.run_step(batch, cond)
-            if self.step % self.log_interval == 0:
-                # logger.dumpkvs()
-                print('Step', self.step)
-            if self.step % self.save_interval == 0:
+        print("Running training loop")
+
+        with tqdm(total=self.lr_anneal_steps, desc="TrainLoop.run_loop") as pbar:
+            while (
+                not self.lr_anneal_steps
+                or self.step + self.resume_step < self.lr_anneal_steps
+            ):
+                batch, cond = next(self.data)
+                loss = self.run_step(batch, cond)
+
+                pbar.set_description(f"Loss: {loss:.4f}")
+
+                if self.step % self.log_interval == 0:
+                    # logger.dumpkvs()
+                    print("Step", self.step)
+                if self.step % self.save_interval == 0:
+                    self.save()
+                    # Run for a finite amount of time in integration tests.
+                    if os.environ.get("DIFFUSION_TRAINING_TEST", "") and self.step > 0:
+                        return
+                self.step += 1
+                pbar.update(1)
+            # Save the last checkpoint if it wasn't already saved.
+            if (self.step - 1) % self.save_interval != 0:
                 self.save()
-                # Run for a finite amount of time in integration tests.
-                if os.environ.get("DIFFUSION_TRAINING_TEST", "") and self.step > 0:
-                    return
-            self.step += 1
-        # Save the last checkpoint if it wasn't already saved.
-        if (self.step - 1) % self.save_interval != 0:
-            self.save()
 
     def run_step(self, batch, cond):
-        self.forward_backward(batch, cond)
+        loss = self.forward_backward(batch, cond)
         took_step = self.mp_trainer.optimize(self.opt)
         if took_step:
             self._update_ema()
         self._anneal_lr()
-        # self.log_step()
+        return loss
 
     def forward_backward(self, batch, cond):
         self.mp_trainer.zero_grad()
@@ -226,6 +234,7 @@ class TrainLoop:
             #     self.diffusion, t, {k: v * weights for k, v in losses.items()}
             # )
             self.mp_trainer.backward(loss)
+            return loss.item()
 
     def _update_ema(self):
         for rate, params in zip(self.ema_rate, self.ema_params):
@@ -257,7 +266,7 @@ class TrainLoop:
 
         # delete old checkpoints
         if dist.get_rank() == 0:
-            for f in glob.glob(os.path.join(get_blob_logdir(), '*.pt')):
+            for f in glob.glob(os.path.join(get_blob_logdir(), "*.pt")):
                 os.remove(os.path.join(get_blob_logdir(), f))
 
         save_checkpoint(0, self.mp_trainer.master_params)

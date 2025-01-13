@@ -1,9 +1,10 @@
 !**/__pycache__/
 *.pyc
-pretrained_models
+*pretrained*
 DiVE-models
 DiVE-DDPM-comp
 
+*svg
 *png
 .vscode
 *.pt

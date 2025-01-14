@@ -14,3 +14,5 @@ DiVE-DDPM-comp
 *.jpg
 logs
 *.log
+*.npy
+PKG-INFO

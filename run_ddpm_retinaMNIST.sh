@@ -6,6 +6,7 @@
 #SBATCH --constraint=80gb
 #SBATCH --output=logs/job-%j.out
 #SBATCH --chdir=/home/tha/ACE
+#SBATCH --signal=SIGUSR1@600
 set -x
 
 apptainer run --nv /home/tha/apptainers/thesis.sif \

@@ -29,15 +29,22 @@ def main():
     model, diffusion = create_model_and_diffusion(
         **args_to_dict(args, model_and_diffusion_defaults().keys())
     )
+    print("Device: ", dist_util.dev())
     model.to(dist_util.dev())
     schedule_sampler = create_named_schedule_sampler(args.schedule_sampler, diffusion)
 
     logger.log("creating retinaMNIST loader...")
 
     dataset = RetinaMNISTDataset(mode="ace_train_ddpm")
-    data = iter(
-        DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
-    )
+
+    def infinite_iterator():
+        dataloader = DataLoader(
+            dataset, batch_size=args.batch_size, shuffle=False, num_workers=4
+        )
+        while True:
+            yield from dataloader
+
+    data = infinite_iterator()
 
     logger.log("training...")
     TrainLoop(
@@ -65,11 +72,11 @@ def create_argparser():
         lr=1e-4,
         weight_decay=0.0,
         lr_anneal_steps=0,
-        batch_size=1,
+        batch_size=32,
         microbatch=-1,  # -1 disables microbatches
         ema_rate="0.9999",  # comma-separated list of EMA values
-        log_interval=10,
-        save_interval=10000,
+        log_interval=1_000,
+        save_interval=10_000,
         resume_checkpoint="",
         use_fp16=False,
         fp16_scale_growth=1e-3,
@@ -93,3 +100,4 @@ def create_argparser():
 
 if __name__ == "__main__":
     main()
+    print("main done.")

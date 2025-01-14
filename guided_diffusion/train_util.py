@@ -9,6 +9,8 @@ import torch.distributed as dist
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.optim import AdamW
 
+from guided_diffusion.respace import SpacedDiffusion
+
 from . import dist_util, logger
 from .fp16_util import MixedPrecisionTrainer
 from .nn import update_ema
@@ -16,6 +18,9 @@ from .resample import LossAwareSampler, UniformSampler
 from .sample_utils import load_from_DDP_model
 
 from tqdm import tqdm
+
+from thesis_utils.debug import setup_usr1_signal_handler, usr1_signal_received
+from thesis_utils.file_utils import save_img_threaded
 
 # For ImageNet experiments, this was a good default value.
 # We found that the lg_loss_scale quickly climbed to
@@ -44,7 +49,7 @@ class TrainLoop:
         lr_anneal_steps=0,
     ):
         self.model = model
-        self.diffusion = diffusion
+        self.diffusion: SpacedDiffusion = diffusion
         self.data = data
         self.batch_size = batch_size
         self.microbatch = microbatch if microbatch > 0 else batch_size
@@ -92,7 +97,8 @@ class TrainLoop:
                 for _ in range(len(self.ema_rate))
             ]
 
-        if th.cuda.is_available():
+        if False:
+            # if th.cuda.is_available():
             self.use_ddp = True
             self.ddp_model = DDP(
                 self.model,
@@ -110,6 +116,9 @@ class TrainLoop:
                 )
             self.use_ddp = False
             self.ddp_model = self.model
+
+        # DHA
+        setup_usr1_signal_handler()
 
     def _load_and_sync_parameters(self):
         resume_checkpoint = find_resume_checkpoint() or self.resume_checkpoint
@@ -130,7 +139,7 @@ class TrainLoop:
                 )
                 print("done")
 
-        dist_util.sync_params(self.model.parameters())
+        # dist_util.sync_params(self.model.parameters())
 
     def _load_ema_parameters(self, rate):
         ema_params = copy.deepcopy(self.mp_trainer.master_params)
@@ -149,7 +158,7 @@ class TrainLoop:
                 ema_params = self.mp_trainer.state_dict_to_master_params(state_dict)
                 print("done")
 
-        dist_util.sync_params(ema_params)
+        # dist_util.sync_params(ema_params)
         return ema_params
 
     def _load_optimizer_state(self):
@@ -164,10 +173,23 @@ class TrainLoop:
             )
             self.opt.load_state_dict(state_dict)
 
-    def run_loop(self):
-        print("Running training loop")
+    def generate_log_samples(self, batch):
+        # Generate Sample Images, Always only sample 8 images
+        cur_samples = self.diffusion.p_sample_loop(
+            self.model, shape=[8] + list(batch.shape[1:])
+        )
+        cur_samples = cur_samples * 2 + 1  # Rescale to [0, 1]
+        save_img_threaded(
+            cur_samples,
+            os.path.join(get_blob_logdir(), f"samples/sample_{self.step:09d}.png"),
+        )
 
-        with tqdm(total=self.lr_anneal_steps, desc="TrainLoop.run_loop") as pbar:
+    def run_loop(self):
+        print(f"Running training loop with lr_anneal_steps={self.lr_anneal_steps}.")
+
+        with tqdm(
+            desc="TrainLoop.run_loop", total=self.lr_anneal_steps, ncols=72
+        ) as pbar:
             while (
                 not self.lr_anneal_steps
                 or self.step + self.resume_step < self.lr_anneal_steps
@@ -175,24 +197,33 @@ class TrainLoop:
                 batch, cond = next(self.data)
                 loss = self.run_step(batch, cond)
 
-                pbar.set_description(f"Loss: {loss:.4f}")
+                pbar.set_postfix({"loss": f"{loss:.4f}", "step": self.step})
 
+                # Log the loss and samples
                 if self.step % self.log_interval == 0:
-                    # logger.dumpkvs()
-                    print("Step", self.step)
+                    self.log_step(loss)
+                    logger.dumpkvs()
+
                 if self.step % self.save_interval == 0:
                     self.save()
+                    self.generate_log_samples(batch=batch)
                     # Run for a finite amount of time in integration tests.
                     if os.environ.get("DIFFUSION_TRAINING_TEST", "") and self.step > 0:
                         return
                 self.step += 1
                 pbar.update(1)
+
+                if usr1_signal_received():
+                    print("USR1 signal received, breaking out of training loop.")
+                    break
+
             # Save the last checkpoint if it wasn't already saved.
             if (self.step - 1) % self.save_interval != 0:
                 self.save()
+                self.generate_log_samples(batch=batch)
 
     def run_step(self, batch, cond):
-        loss = self.forward_backward(batch, cond)
+        loss: float = self.forward_backward(batch, cond)
         took_step = self.mp_trainer.optimize(self.opt)
         if took_step:
             self._update_ema()
@@ -248,7 +279,8 @@ class TrainLoop:
         for param_group in self.opt.param_groups:
             param_group["lr"] = lr
 
-    def log_step(self):
+    def log_step(self, loss: float):
+        logger.logkv("loss", loss)
         logger.logkv("step", self.step + self.resume_step)
         logger.logkv("samples", (self.step + self.resume_step + 1) * self.global_batch)
 
@@ -256,7 +288,7 @@ class TrainLoop:
         def save_checkpoint(rate, params):
             state_dict = self.mp_trainer.master_params_to_state_dict(params)
             if dist.get_rank() == 0:
-                print(f"saving model {rate}...")
+                print(f"saving ema model {rate}...")
                 if not rate:
                     filename = f"model{(self.step+self.resume_step):06d}.pt"
                 else:
@@ -280,7 +312,7 @@ class TrainLoop:
             ) as f:
                 th.save(self.opt.state_dict(), f)
 
-        dist.barrier()
+        # dist.barrier()
 
 
 def parse_resume_step_from_filename(filename):

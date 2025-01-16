@@ -97,7 +97,7 @@ class JointClassifierDDPM(torch.nn.Module):
 
         x = (x * 0.5) + 0.5
 
-        return x.detach().cpu(), initial_pred.item()
+        return x.detach().cpu(), initial_pred
 
 
 # =======================================================
@@ -148,18 +148,28 @@ class Attack():
 
     def save_intermediate_img(self, x, n_iter, y_pred):
         """
-        Saves a single image intermediate images for the attack
+        Saves intermediate images for the attack
         """
-        assert len(x.shape) == 3, "x must be a single image"
+        if len(x.shape) == 3:
+            img_idx_path = os.path.join(self.steps_dir, self.current_image)
 
-        img_idx_path = os.path.join(self.steps_dir, self.current_image)
+            y_pred_formatted = f"{y_pred.item():.3e}"
+            img_path = os.path.join(
+                img_idx_path, f"niter={n_iter:04d}_y={y_pred_formatted}.png"
+            )
 
-        y_pred_formatted = f"{y_pred.item():.3e}"
-        img_path = os.path.join(
-            img_idx_path, f"niter={n_iter:04d}_y={y_pred_formatted}.png"
-        )
+            save_img_threaded(x, img_path)
+        elif len(x.shape) == 4:
+            for i in range(x.size(0)):
+                img = x[i]
+                img_idx_path = os.path.join(self.steps_dir, self.current_image[i])
 
-        save_img_threaded(x, img_path)
+                y_pred_formatted = f"{y_pred[i].item():.3e}"
+                img_path = os.path.join(
+                    img_idx_path, f"niter={n_iter:04d}_y={y_pred_formatted}.png"
+                )
+                save_img_threaded(img, img_path)
+
 
     def set_dist_schedule(self, schedule):
         '''
@@ -463,37 +473,108 @@ def get_attack(attack, use_checkpoint, use_shortcut=False):
             elif (self.loss_fn is None) and self.binary:
                 self.loss_fn = torch.nn.BCEWithLogitsLoss()
 
+        # @torch.no_grad()
+        # def attack(self, x, y):
+        #     '''
+        #     Main PGD algorithm
+        #     '''
+
+        #     x_adv = x.clone().detach()
+        #     projection_fn = self.linf_norm_proj if self.norm == 'linf' else self.l2_norm_proj
+
+        #     success = False
+        #     with tqdm(range(self.nb_iter), desc='PGD Attacking') as pbar:
+        #         for i in pbar:
+        #             grad, prediction = self.extract_grads(x_adv, y)
+        #             grad = self.sign * grad + self.extract_dist_grads(i, x, x_adv.clone().detach())
+        #             x_adv -= grad.sign() * self.step
+        #             x_adv = projection_fn(x, x_adv)
+
+        #             y_hat = self.predictor(x_adv)
+        #             confidence = get_regr_confidence(y, y_hat)
+
+        #             self.save_intermediate_img(x_adv[0], i, prediction)
+        #             pbar.set_postfix(
+        #                 confidence=confidence.item(),
+        #                 regr=prediction.item(),
+        #                 max_gpu_GB=torch.cuda.max_memory_reserved() / 1e9,
+        #             )
+        #             if confidence.item() <= self.confidence_threshold:
+        #                 success = True
+        #                 break
+
+        #     return x_adv, success, i
+
         @torch.no_grad()
-        def attack(self, x, y):
-            '''
-            Main PGD algorithm
-            '''
+        def attack(self, xs: torch.Tensor, ys: torch.Tensor):
+            """
+            Main PGD algorithm, running on batches
+            """
 
-            x_adv = x.clone().detach()
-            projection_fn = self.linf_norm_proj if self.norm == 'linf' else self.l2_norm_proj        
+            xs_adv = xs.clone().detach()
+            projection_fn = (
+                self.linf_norm_proj if self.norm == "linf" else self.l2_norm_proj
+            )
 
-            success = False
-            with tqdm(range(self.nb_iter), desc='PGD Attacking') as pbar:
-                for i in pbar:
-                    grad, prediction = self.extract_grads(x_adv, y)
-                    grad = self.sign * grad + self.extract_dist_grads(i, x, x_adv.clone().detach())
-                    x_adv -= grad.sign() * self.step
-                    x_adv = projection_fn(x, x_adv)
+            attacking_mask = torch.ones(xs.size(0)).to(xs_adv).view(-1, 1, 1, 1)
+            confidence_thresholds: torch.Tensor = torch.Tensor(
+                [self.confidence_threshold]
+            ).to(xs)
+            steps_needed = torch.zeros(xs.size(0), dtype=torch.int16)
 
-                    y_hat = self.predictor(x_adv)
-                    confidence = get_regr_confidence(y, y_hat)
+            def track_successful_attacks(
+                i: int,
+                attacking_mask: torch.Tensor,
+                confidence_thresholds: torch.Tensor,
+                confidences: torch.Tensor,
+                steps_needed: torch.Tensor,
+            ):
+                successful_attacks = confidences <= confidence_thresholds
+                attacking_mask[successful_attacks] = 0
+                steps_needed = torch.where(
+                    attacking_mask.view(-1).cpu() == 1,
+                    i,
+                    steps_needed,
+                )
+                return attacking_mask, steps_needed
 
-                    self.save_intermediate_img(x_adv[0], i, prediction)
+            with tqdm(range(self.nb_iter), desc="PGD Attacking") as pbar:
+                def update_pbar(attacking_mask, y_hat, confidences):
                     pbar.set_postfix(
-                        confidence=confidence.item(),
-                        regr=prediction.item(),
+                        confidence_mean=confidences.mean().item(),
+                        regr=[f"{val:.4f}" for val in y_hat.cpu().view(-1).tolist()],
+                        attacking=attacking_mask.view(-1).int().cpu().tolist(),
                         max_gpu_GB=torch.cuda.max_memory_reserved() / 1e9,
                     )
-                    if confidence.item() <= self.confidence_threshold:
-                        success = True
+
+                for i in pbar:
+                    grads, y_hat = self.extract_grads(xs_adv, ys)
+                    grads = self.sign * grads + self.extract_dist_grads(
+                        i, xs, xs_adv.clone().detach()
+                    )
+                    xs_adv -= grads.sign() * self.step * attacking_mask
+                    xs_adv = projection_fn(xs, xs_adv)
+
+                    # y_hat = self.predictor(xs_adv)
+                    confidences = get_regr_confidence(ys, y_hat)
+
+                    self.save_intermediate_img(xs_adv, i, y_hat)
+                    update_pbar(attacking_mask, y_hat, confidences)
+
+                    # Handle the images that have reached the confidence threshold and update mask
+                    attacking_mask, steps_needed = track_successful_attacks(
+                        i,
+                        attacking_mask,
+                        confidence_thresholds,
+                        confidences,
+                        steps_needed,
+                    )
+
+                    if attacking_mask.sum() == 0:
                         break
 
-            return x_adv, success, i
+            successes: list[bool] = (~attacking_mask.bool().view(-1)).cpu().tolist()
+            return xs_adv, successes, steps_needed.tolist()
 
     class GradientDescent(BaseAttack):
         '''

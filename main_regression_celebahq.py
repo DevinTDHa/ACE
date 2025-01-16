@@ -1,9 +1,9 @@
 import os
 import argparse
-
 from os import path as osp
 
 import torch
+from torch.utils.data import DataLoader
 
 from tqdm import tqdm
 
@@ -39,7 +39,7 @@ from thesis_utils.file_utils import (
 )
 from thesis_utils.image_folder_dataset import default_transforms
 from thesis_utils.celebahq_dataset import CelebAHQDataset
-from thesis_utils.models import load_resnet
+from thesis_utils.models import load_model as load_thesis_model
 
 
 # =======================================================
@@ -52,10 +52,10 @@ from thesis_utils.models import load_resnet
 def create_args():
     defaults = dict(
         clip_denoised=True,  # Clipping noise
-        batch_size=16,  # Batch size
+        batch_size=4,  # Batch size
         gpu="0",  # GPU index, should only be 1 gpu
         save_images=False,  # Saving all images
-        num_samples=10_000,  # useful to sample few examples
+        num_samples=2000,  # useful to sample few examples
         cudnn_deterministic=False,  # setting this to true will slow the computation time but will have identic results when using the checkpoint backwards
         # path args
         model_path="",  # DDPM weights path
@@ -145,8 +145,6 @@ def create_args():
 # Custom functions
 # =======================================================
 # =======================================================
-
-
 @torch.no_grad()
 def filter_fn(
     diffusion,
@@ -164,7 +162,7 @@ def filter_fn(
 
     # 1. Generate pre-explanation
     with torch.enable_grad():
-        pe, success, steps_done = attack.perturb(x, target)
+        pe, successes, steps_done = attack.perturb(x, target)
 
     # 2. Inpainting: generates masks
     mask, dil_mask = generate_mask(x, pe, dilation)
@@ -201,7 +199,7 @@ def filter_fn(
     ce = ce.clamp(0, 1)
     noise_x = ((noise_x * 0.5) + 0.5).clamp(0, 1)
 
-    return ce, pe, noise_x, mask, success, steps_done
+    return ce, pe, noise_x, mask, successes, steps_done
 
 
 @torch.no_grad()
@@ -238,45 +236,29 @@ def load_model(args):
 def get_data(args):
     compose = default_transforms(args.image_size)
     dataset = CelebAHQDataset(root=args.image_folder, transform=compose, get_mode="cf")
+    num_samples = (
+        len(dataset)
+        if args.num_samples is None
+        else min(args.num_samples, len(dataset))
+    )
+    dataset = torch.utils.data.Subset(dataset, range(num_samples))
     return dataset
 
 
-def main() -> None:
-    args = create_args()
-
-    # if args.merge_chunks:
-    #     merge_all_chunks(args.chunks, args.output_path, args.exp_name)
-    #     return
-
+def load_models_and_attack(args):
+    # ========================================
+    # Prepare Additional args
+    # ========================================
     respaced_steps = int(args.sampling_time_fraction * int(args.timestep_respacing))
     normal_steps = int(args.sampling_time_fraction * int(args.diffusion_steps))
-
     print("Using", respaced_steps, "respaced steps and", normal_steps, "normal steps")
-
-    args.respaced_steps = respaced_steps
-    args.normal_steps = normal_steps
-
-    # ========================================
-    # Setup the environment and results
-    # ========================================
-
-    deterministic_run(args.seed)
-    assert_paths_exist(
-        [args.model_path, args.rmodel_path, args.roracle_path, args.image_folder]
-    )
-    result_dir = create_result_dir(osp.join(args.output_path))
-    dump_args(args, result_dir)
-
-    # ========================================
-    # load models
-    # ========================================
 
     print("Loading Model and diffusion model")
     # respaced diffusion has the respaced strategy
     model, respaced_diffusion = load_model(args)
 
     print("Loading Regressor")
-    classifier = load_resnet(args.rmodel_path)
+    classifier = load_thesis_model(args.rmodel_path)
     classifier.to(dist_util.dev()).eval()
 
     if args.attack_joint and not (
@@ -294,35 +276,7 @@ def main() -> None:
     # ========================================
     # load attack
     # ========================================
-
-    def get_dist_fn():
-
-        any_loss = False
-        if args.dist_l2 != 0.0:
-            l2_loss = (
-                lambda x, x_adv: args.dist_l2
-                * torch.linalg.norm((x - x_adv).view(x.size(0), -1), dim=1).sum()
-            )
-            any_loss = True
-
-        if args.dist_l1 != 0.0:
-            l1_loss = lambda x, x_adv: args.dist_l1 * (x - x_adv).abs().sum()
-            any_loss = True
-
-        if not any_loss:
-            return None
-
-        def dist_fn(x, x_adv):
-            loss = 0
-            if args.dist_l2 != 0.0:
-                loss += l2_loss(x, x_adv)
-            if args.dist_l1 != 0.0:
-                loss += l1_loss(x, x_adv)
-            return loss
-
-        return dist_fn
-
-    dist_fn = get_dist_fn()
+    dist_fn = get_dist_fn(args)
 
     attack_args = {
         "predict": (
@@ -340,7 +294,7 @@ def main() -> None:
         "binary": False,
         "step": args.attack_step / 255,
         "confidence_threshold": args.confidence_threshold,
-        "steps_dir": osp.join(result_dir, "steps"),
+        "steps_dir": osp.join(args.output_path, "steps"),
     }
 
     attack = get_attack(
@@ -363,12 +317,65 @@ def main() -> None:
     else:
         attack = attack(**attack_args)  # Constructor
 
+    return model, respaced_diffusion, classifier, joint_classifier, attack
+
+
+def get_dist_fn(args):
+    any_loss = False
+    if args.dist_l2 != 0.0:
+        l2_loss = (
+            lambda x, x_adv: args.dist_l2
+            * torch.linalg.norm((x - x_adv).view(x.size(0), -1), dim=1).sum()
+        )
+        any_loss = True
+
+    if args.dist_l1 != 0.0:
+        l1_loss = lambda x, x_adv: args.dist_l1 * (x - x_adv).abs().sum()
+        any_loss = True
+
+    if not any_loss:
+        return None
+
+    def dist_fn(x, x_adv):
+        loss = 0
+        if args.dist_l2 != 0.0:
+            loss += l2_loss(x, x_adv)
+        if args.dist_l1 != 0.0:
+            loss += l1_loss(x, x_adv)
+        return loss
+
+    return dist_fn
+
+
+def main() -> None:
+    args = create_args()
+
+    # ========================================
+    # Setup the environment and results
+    # ========================================
+    deterministic_run(args.seed)
+    assert_paths_exist(
+        [args.model_path, args.rmodel_path, args.roracle_path, args.image_folder]
+    )
+    result_dir = create_result_dir(osp.join(args.output_path))
+    dump_args(args, result_dir)
+
+    # ========================================
+    # load models and attack
+    # ========================================
+    model, respaced_diffusion, classifier, joint_classifier, attack = (
+        load_models_and_attack(args)
+    )
+    respaced_steps = int(args.sampling_time_fraction * int(args.timestep_respacing))
+
     dataset = get_data(args)
 
-    num_samples = (
-        len(dataset)
-        if args.num_samples is None
-        else min(args.num_samples, len(dataset))
+    dataloader = DataLoader(
+        dataset,
+        batch_size=args.batch_size,
+        shuffle=False,
+        num_workers=4,
+        pin_memory=True,
     )
 
     diffeocf_results: list[CFResult] = []
@@ -381,21 +388,18 @@ def main() -> None:
     os.makedirs(noise_path, exist_ok=True)
     os.makedirs(mask_path, exist_ok=True)
 
-    with tqdm(range(num_samples), desc="Running ACE") as pbar:
-        for i in pbar:
-            f: str
-            x: torch.Tensor
-            f, x, target = dataset[i]
-
-            x = x.unsqueeze(0).to(dist_util.dev())
+    with tqdm(dataloader, desc="Running ACE") as pbar:
+        for f, x, targets in pbar:
+            # x = x.unsqueeze(0).to(dist_util.dev())
+            x = x.to(dist_util.dev())
+            targets = targets.to(dist_util.dev()).view(-1, 1)
             x_reconstructed, y_initial = joint_classifier.initial(x)
-            target_tensor = torch.Tensor([[target]]).to(x)
 
             pbar.set_postfix_str(f"Processing: {f}")
 
             # Hack for intermediate images
-            image_name = f.split("/")[-1].split(".")[0]
-            attack.current_image = image_name
+            image_names = [f.split("/")[-1].split(".")[0] for f in f]
+            attack.current_image = image_names
             # sample image from the noisy_img
             # DHA: 1. Extract grads with JointClassifierDDPM.forward and perform PGD
             # DHA: 2. Create inpainting for final CE
@@ -406,38 +410,42 @@ def main() -> None:
                 steps=respaced_steps,
                 x=x.to(dist_util.dev()),
                 stochastic=args.sampling_stochastic,
-                target=target_tensor,
+                target=targets[: x.size(0)],
                 inpaint=args.sampling_inpaint,
                 dilation=args.sampling_dilation,
             )
 
             with torch.no_grad():
-                y_final = joint_classifier.classifier(ce).item()
-
+                y_final = joint_classifier.classifier(ce)
                 x = x.detach().cpu()
                 x_prime = ce.detach().cpu()
-                cf_result = CFResult(
-                    image_path=f,
-                    x=x,
-                    x_reconstructed=x_reconstructed,
-                    x_prime=x_prime,
-                    y_target=target,
-                    y_initial_pred=y_initial,
-                    y_final_pred=y_final,
-                    success=success,
-                    steps=steps_done,
-                )
-                diffeocf_results.append(cf_result)
 
-            save_img_threaded(pe, osp.join(pe_path, cf_result.image_name))
-            save_img_threaded(noise, osp.join(noise_path, cf_result.image_name))
-            save_img_threaded(pe_mask, osp.join(mask_path, cf_result.image_name))
+                for j in range(x.size(0)):
+                    cf_result = CFResult(
+                        image_path=f[j],
+                        x=x[j].unsqueeze(0),
+                        x_reconstructed=x_reconstructed[j].unsqueeze(0),
+                        x_prime=x_prime[j].unsqueeze(0),
+                        y_target=targets[j].item(),
+                        y_initial_pred=y_initial[j].item(),
+                        y_final_pred=y_final[j].item(),
+                        success=success[j],
+                        steps=steps_done[j],
+                    )
+                    diffeocf_results.append(cf_result)
 
+                    save_img_threaded(pe[j], osp.join(pe_path, cf_result.image_name))
+                    save_img_threaded(
+                        noise[j], osp.join(noise_path, cf_result.image_name)
+                    )
+                    save_img_threaded(
+                        pe_mask[j], osp.join(mask_path, cf_result.image_name)
+                    )
 
     # Save the results for the diffeo_cf attacks
     del model
     del joint_classifier
-    oracle = load_resnet(args.roracle_path).to("cuda")
+    oracle = load_thesis_model(args.roracle_path).to("cuda")
     update_results_oracle(oracle, diffeocf_results, args.confidence_threshold)
 
     save_cf_results(diffeocf_results, args.output_path)

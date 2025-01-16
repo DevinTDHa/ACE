@@ -390,14 +390,20 @@ def main() -> None:
     respaced_steps = int(args.sampling_time_fraction * int(args.timestep_respacing))
 
     dataset, meta = get_data(args)
-    dataloader = DataLoader(
-        dataset, batch_size=args.batch_size, shuffle=False, num_workers=4, pin_memory=True
-    )
-
+    # TODO: use subset to limit the number of samples
     num_samples = (
         len(dataset)
         if args.num_samples is None
         else min(args.num_samples, len(dataset))
+    )
+    dataset = torch.utils.data.Subset(dataset, range(num_samples))
+
+    dataloader = DataLoader(
+        dataset,
+        batch_size=args.batch_size,
+        shuffle=False,
+        num_workers=4,
+        pin_memory=True,
     )
 
     diffeocf_results: list[CFResult] = []
@@ -410,7 +416,11 @@ def main() -> None:
     os.makedirs(noise_path, exist_ok=True)
     os.makedirs(mask_path, exist_ok=True)
 
-    target = torch.Tensor([[args.target]]).to(dist_util.dev()).broadcast_to([args.batch_size, 1])
+    target = (
+        torch.Tensor([[args.target]])
+        .to(dist_util.dev())
+        .broadcast_to([args.batch_size, 1])
+    )
     with tqdm(dataloader, desc="Running ACE") as pbar:
         for f, x in pbar:
             # x = x.unsqueeze(0).to(dist_util.dev())

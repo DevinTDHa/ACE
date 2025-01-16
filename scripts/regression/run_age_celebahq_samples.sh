@@ -40,7 +40,7 @@
 # # DATASET
 MODEL_FLAGS="--attention_resolutions 32,16,8 --class_cond False --diffusion_steps 500 --learn_sigma True --noise_schedule linear --num_channels 128 --num_head_channels 64 --num_res_blocks 2 --resblock_updown True --use_fp16 True --use_scale_shift_norm True"
 MODEL_PATH="/home/tha/ACE/pretrained/celebahq-ddpm.pt"
-RMODEL_PATH="/home/tha/master-thesis-xai/thesis_utils/scripts/train/runs/imdb_clean-256/version_0/checkpoints/last.ckpt"
+RMODEL_PATH="/home/tha/thesis_runs/regressor/imdb_wiki_densenet_linear_only-256/version_0/checkpoints/last.ckpt"
 RORACLE_PATH="/home/tha/master-thesis-xai/thesis_utils/scripts/train/runs/imdb_clean_oracle-256/version_0/checkpoints/last.ckpt"
 CONFIDENCE_THRESHOLD="0.05"
 IMAGE_FOLDER="/home/tha/datasets/celebahq_samples"
@@ -59,9 +59,10 @@ DIST_L2=${4:-0.0}
 
 TARGET=0.8
 STOP_AT=0.8
-NUM_SAMPLES=30
-NAME="CelebaHQ_samples-method=${ATTACK_METHOD}_step=${ATACK_STEP}_dist_l1=${DIST_L1}_dist_l2=${DIST_L2}_t=${TARGET}"
-OUTPUT_PATH="ace_results/$NAME"
+NUM_SAMPLES=20
+TODAY=$(date '+%Y-%m-%d')
+NAME="method=${ATTACK_METHOD}_step=${ATACK_STEP}_l1=${DIST_L1}_l2=${DIST_L2}_t=${TARGET}"
+OUTPUT_PATH="/home/tha/thesis_runs/ace_results/CelebaHQ_samples_$TODAY/$NAME/"
 
 echo "Runnning $NAME"
 # Run the Python script with the arguments
@@ -89,41 +90,41 @@ apptainer run \
     --timestep_respacing=25 \
     --sampling_time_fraction=0.2 \
     --target=$TARGET \
-    --stop_at=$STOP_AT \
-    >logs/$NAME.log 2>&1 &
+    --stop_at=$STOP_AT
+#     >logs/$NAME.log 2>&1 &
 
-TARGET=0.1
-STOP_AT=0.1
-NAME="CelebaHQ_samples-method=${ATTACK_METHOD}_step=${ATACK_STEP}_dist_l1=${DIST_L1}_dist_l2=${DIST_L2}_t=${TARGET}"
-OUTPUT_PATH="ace_results/$NAME"
+# TARGET=0.1
+# STOP_AT=0.1
+# NAME="CelebaHQ_samples-method=${ATTACK_METHOD}_step=${ATACK_STEP}_dist_l1=${DIST_L1}_dist_l2=${DIST_L2}_t=${TARGET}"
+# OUTPUT_PATH="ace_results/$NAME"
 
-echo "Runnning $NAME"
-# Run the Python script with the arguments
-apptainer run \
-    -B /home/space/datasets:/home/space/datasets \
-    -B /home/space/datasets-sqfs/CelebAMask-HQ.sqfs:/data/CelebAMask-HQ:image-src=/ \
-    --nv \
-    ~/apptainers/thesis.sif \
-    python main_regression.py $MODEL_FLAGS \
-    --model_path=$MODEL_PATH \
-    --rmodel_path=$RMODEL_PATH \
-    --roracle_path=$RORACLE_PATH \
-    --attack_step=$ATACK_STEP \
-    --confidence_threshold=$CONFIDENCE_THRESHOLD \
-    --image_folder=$IMAGE_FOLDER \
-    --image_size=$IMAGE_SIZE \
-    --output_path=$OUTPUT_PATH \
-    --num_samples=$NUM_SAMPLES \
-    --exp_name=$NAME \
-    --attack_method=$ATTACK_METHOD \
-    --attack_iterations=100 \
-    --attack_joint=True \
-    --dist_l1=$DIST_L1 \
-    --dist_l2=$DIST_L2 \
-    --timestep_respacing=25 \
-    --sampling_time_fraction=0.2 \
-    --target=$TARGET \
-    --stop_at=$STOP_AT \
-    >logs/$NAME.log 2>&1 &
+# echo "Runnning $NAME"
+# # Run the Python script with the arguments
+# apptainer run \
+#     -B /home/space/datasets:/home/space/datasets \
+#     -B /home/space/datasets-sqfs/CelebAMask-HQ.sqfs:/data/CelebAMask-HQ:image-src=/ \
+#     --nv \
+#     ~/apptainers/thesis.sif \
+#     python main_regression.py $MODEL_FLAGS \
+#     --model_path=$MODEL_PATH \
+#     --rmodel_path=$RMODEL_PATH \
+#     --roracle_path=$RORACLE_PATH \
+#     --attack_step=$ATACK_STEP \
+#     --confidence_threshold=$CONFIDENCE_THRESHOLD \
+#     --image_folder=$IMAGE_FOLDER \
+#     --image_size=$IMAGE_SIZE \
+#     --output_path=$OUTPUT_PATH \
+#     --num_samples=$NUM_SAMPLES \
+#     --exp_name=$NAME \
+#     --attack_method=$ATTACK_METHOD \
+#     --attack_iterations=100 \
+#     --attack_joint=True \
+#     --dist_l1=$DIST_L1 \
+#     --dist_l2=$DIST_L2 \
+#     --timestep_respacing=25 \
+#     --sampling_time_fraction=0.2 \
+#     --target=$TARGET \
+#     --stop_at=$STOP_AT \
+#     >logs/$NAME.log 2>&1 &
 
-wait
+# wait

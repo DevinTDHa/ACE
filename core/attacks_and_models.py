@@ -1,12 +1,7 @@
-import math
 import os
 
 from tqdm import tqdm
-from guided_diffusion.sample_utils import ImageSaver
 import torch
-from torchvision.utils import save_image
-import numpy as np
-import threading
 
 from thesis_utils.metrics import get_regr_confidence
 from thesis_utils.file_utils import save_img_threaded
@@ -51,13 +46,11 @@ class JointClassifierDDPM(torch.nn.Module):
             if idx == 0:
                 x = self.diffusion.q_sample(x, t, noise=self.noise_fn(x))
 
-            out = self.diffusion.p_mean_variance(
-                self.ddpm, x, t,
-                clip_denoised=True)
+            out = self.diffusion.p_mean_variance(self.ddpm, x, t, clip_denoised=True)
 
-            x = out['mean']
+            x = out["mean"]
 
-            if (idx != (self.steps - 1)):
+            if idx != (self.steps - 1):
                 if self.stochastic:
                     x += torch.exp(0.5 * out["log_variance"]) * self.noise_fn(x)
 
@@ -68,7 +61,7 @@ class JointClassifierDDPM(torch.nn.Module):
         self.index += 1
 
         return self.classifier(x)
-    
+
     @torch.no_grad()
     def initial(self, x):
         timesteps = list(range(self.steps))[::-1]
@@ -85,13 +78,11 @@ class JointClassifierDDPM(torch.nn.Module):
             if idx == 0:
                 x = self.diffusion.q_sample(x, t, noise=self.noise_fn(x))
 
-            out = self.diffusion.p_mean_variance(
-                self.ddpm, x, t,
-                clip_denoised=True)
+            out = self.diffusion.p_mean_variance(self.ddpm, x, t, clip_denoised=True)
 
-            x = out['mean']
+            x = out["mean"]
 
-            if (idx != (self.steps - 1)):
+            if idx != (self.steps - 1):
                 if self.stochastic:
                     x += torch.exp(0.5 * out["log_variance"]) * self.noise_fn(x)
 
@@ -105,31 +96,45 @@ class JointClassifierDDPM(torch.nn.Module):
 # =======================================================
 
 
-class Attack():
-    '''
+class Attack:
+    """
     Base Attack class. Computes basic things such as:
         - Set distance schedule.
         - Computes l2 and linf projections
         - Choses if the attack is untargetted or
           targetted (done via perturb fn)
-    '''
-    def __init__(self, predict, loss_fn, dist_fn, confidence_threshold, steps_dir,
-                 eps, step=1 / 255, nb_iter=100,
-                 norm='linf', dist_schedule='none',
-                 binary=False, predictor: torch.nn.Module = None):
-        '''
+    """
+
+    def __init__(
+        self,
+        predict,
+        loss_fn,
+        dist_fn,
+        confidence_threshold,
+        steps_dir,
+        eps,
+        step=1 / 255,
+        nb_iter=100,
+        norm="linf",
+        dist_schedule="none",
+        binary=False,
+        predictor: torch.nn.Module = None,
+    ):
+        """
         :param predict: classification model
         :param loss_fn: loss function
-        :param dist_fn: distance function 
+        :param dist_fn: distance function
         :param eps: attack budget
         :param step: optimization step
         :param nb_iters: number of iterations
         :param norm: ball norm
         :param dist_schedule: schedule type for the distance loss
         :param binary: flag to tell if the model is binary of multi class
-        '''
+        """
         self.predict = predict
-        assert predictor is not None, 'Parameter predictor must be defined for regression version.'
+        assert (
+            predictor is not None
+        ), "Parameter predictor must be defined for regression version."
         self.predictor: torch.nn.Module = predictor
         self.loss_fn = loss_fn
         self.dist_fn = dist_fn
@@ -139,7 +144,7 @@ class Attack():
         self.nb_iter = nb_iter
         self.norm = norm
         self.step = step
-        assert norm in ['linf', 'l2'], 'PGD norm must by "linf" or "l2"'
+        assert norm in ["linf", "l2"], 'PGD norm must by "linf" or "l2"'
         self.set_dist_schedule(dist_schedule)
         self.binary = binary
         self.confidence_threshold = confidence_threshold
@@ -170,28 +175,27 @@ class Attack():
                 )
                 save_img_threaded(img, img_path)
 
-
     def set_dist_schedule(self, schedule):
-        '''
+        """
         Sets the distance schedule for the sampling looping
-        '''
+        """
         looper = range(self.nb_iter)
-        if schedule == 'none':
+        if schedule == "none":
             schedule = [1 for _ in looper]
-        elif schedule == 'step':
+        elif schedule == "step":
             schedule = [0 if i <= self.nb_iter // 2 else 1 for i in looper]
-        elif schedule == 'linear':
+        elif schedule == "linear":
             schedule = [(i + 1) / self.nb_iter for i in looper]
         self.dist_schedule = schedule
 
     @torch.enable_grad()
     def extract_dist_grads(self, i, x, x_adv):
-        '''
+        """
         Distance gradients extraction
         :param i: current step
         :param x: clean input
         :param x_adv: adversarial input
-        '''
+        """
         if self.dist_fn is not None:
             x_adv.requires_grad = True
             grad = torch.autograd.grad(self.dist_fn(x, x_adv), x_adv)[0]
@@ -199,40 +203,42 @@ class Attack():
         return 0
 
     def l2_norm_proj(self, x, x_adv):
-        '''
+        """
         Projection over the l2 norm ball over x with a budjet of eps.
         Produce clamping at the end
         :param x: clean instance
         :param x_adv: adversarial instance
-        '''
-        v = (x_adv - x)
+        """
+        v = x_adv - x
         norms = torch.norm(v.view(x.size(0), -1), p=2, dim=1)
         norms = norms.view(-1, 1, 1, 1)
-        passed = (norms > self.eps)
+        passed = norms > self.eps
         return ((self.eps * v * passed / norms + v * (1 - passed)) + x).clamp(0, 1)
 
     def linf_norm_proj(self, x, x_adv):
-        '''
+        """
         Projection over the linf norm ball over x with a budjet of eps.
         Produce clamping at the end
         :param x: clean instance
         :param x_adv: adversarial instance
-        '''
+        """
         x_adv = torch.min(x + self.eps, x_adv)
         x_adv = torch.max(x - self.eps, x_adv)
         return x_adv.clamp(0, 1)
 
     def perturb(self, x, y=None):
-        '''
+        """
         Attack x in a targeted (y!=None) or untargeted way (y==None)
         :param x: input to be attacked
         :param y: optional target
-        '''
+        """
         self.targeted = y is not None
         self.sign = 1 if self.targeted else -1
 
         if not self.targeted:
-            raise NotImplementedError('Untargeted attack for regression not implemented yet.')
+            raise NotImplementedError(
+                "Untargeted attack for regression not implemented yet."
+            )
             # with torch.no_grad():
             #     y = self.predict(x).argmax(dim=1)
 
@@ -240,10 +246,10 @@ class Attack():
 
     @torch.enable_grad()
     def extract_grads(self, x, y):
-        '''
+        """
         Extract gradients of x w.r.t. the loss function operated on y.
         When y was none on perturb, y=f(clean x)
-        '''
+        """
 
         x.requires_grad = True
         out = self.predict(x)
@@ -253,11 +259,11 @@ class Attack():
         return grad, out
 
     def attack(self, x, y):
-        raise NotImplementedError('Attack not implemented.')
+        raise NotImplementedError("Attack not implemented.")
 
 
 class ClassifierDiffusionCheckpointGradients(Attack):
-    '''
+    """
     Class to extract gradients from a DDPM + classifier
     combined model using the checkpoint method. Replaces
     the extract_grads function for the resource-efficient
@@ -266,23 +272,41 @@ class ClassifierDiffusionCheckpointGradients(Attack):
     This method is SLOW but saves a lot of computational resources.
     From my experiments, it is faster to have a more backward steps
     than a larger batch size.
-    '''
-    def __init__(self, predict, diffusion, ddpm,
-                 loss_fn, dist_fn, eps, nb_iter, norm='linf', step=1 / 255,
-                 steps=60, stochastic=True,
-                 backward_steps=1, dist_schedule='none', binary=False):
-        '''
+    """
+
+    def __init__(
+        self,
+        predict,
+        diffusion,
+        ddpm,
+        loss_fn,
+        dist_fn,
+        eps,
+        nb_iter,
+        norm="linf",
+        step=1 / 255,
+        steps=60,
+        stochastic=True,
+        backward_steps=1,
+        dist_schedule="none",
+        binary=False,
+    ):
+        """
         :param steps: forward/backward diffusion steps
         :param stochastic: Change the noise at each step when computing the gradients
-        '''
+        """
 
-        super().__init__(predict=predict,
-                         loss_fn=loss_fn,
-                         dist_fn=dist_fn,
-                         eps=eps, step=step,
-                         nb_iter=nb_iter, norm=norm,
-                         dist_schedule=dist_schedule,
-                         binary=binary)
+        super().__init__(
+            predict=predict,
+            loss_fn=loss_fn,
+            dist_fn=dist_fn,
+            eps=eps,
+            step=step,
+            nb_iter=nb_iter,
+            norm=norm,
+            dist_schedule=dist_schedule,
+            binary=binary,
+        )
 
         # diffusion model objects
         self.ddpm = ddpm
@@ -295,8 +319,13 @@ class ClassifierDiffusionCheckpointGradients(Attack):
     @torch.enable_grad()
     def extract_grads(self, x, y):
 
-        timesteps = list(range(self.steps))[::-1] + ['c']  # the 'c' is for the classification step
-        chunked_timesteps = [timesteps[::-1][i:i + self.backward_steps][::-1] for i in range(0, len(timesteps), self.backward_steps)][::-1]
+        timesteps = list(range(self.steps))[::-1] + [
+            "c"
+        ]  # the 'c' is for the classification step
+        chunked_timesteps = [
+            timesteps[::-1][i : i + self.backward_steps][::-1]
+            for i in range(0, len(timesteps), self.backward_steps)
+        ][::-1]
 
         B, C, H, W = x.shape
         # Precompute all noise steps.
@@ -315,17 +344,28 @@ class ClassifierDiffusionCheckpointGradients(Attack):
             idx = -1
 
             for idx, t in enumerate(schedule):
-                t = torch.tensor([t] * x_orig.size(0),
-                                 device=x_orig.device)
+                t = torch.tensor([t] * x_orig.size(0), device=x_orig.device)
 
                 if idx == 0:
                     x = (x - 0.5) / 0.5
-                    noise = noises[0, ...].unsqueeze(dim=0).expand(x.size(0), -1, -1, -1).to(x.device)
+                    noise = (
+                        noises[0, ...]
+                        .unsqueeze(dim=0)
+                        .expand(x.size(0), -1, -1, -1)
+                        .to(x.device)
+                    )
                     x = self.diffusion.q_sample(x, t, noise=noise)
                     del noise
 
-                x = self.forward(x, t, idx,
-                                 noises[idx + 1].unsqueeze(dim=0).expand(x.size(0), -1, -1, -1).to(x.device))
+                x = self.forward(
+                    x,
+                    t,
+                    idx,
+                    noises[idx + 1]
+                    .unsqueeze(dim=0)
+                    .expand(x.size(0), -1, -1, -1)
+                    .to(x.device),
+                )
 
             diff_steps = chunked_timesteps[pointer]
 
@@ -338,23 +378,32 @@ class ClassifierDiffusionCheckpointGradients(Attack):
 
             for jdx, t in enumerate(diff_steps, start=idx + 1):
 
-                if t == 'c':  # classification step, always final step
+                if t == "c":  # classification step, always final step
                     output = output * 0.5 + 0.5
                     output = self.loss_fn(self.predict(output), y)
 
                 else:  # diffusion steps
-                    t = torch.tensor([t] * x_orig.size(0),
-                                     device=x_orig.device)
+                    t = torch.tensor([t] * x_orig.size(0), device=x_orig.device)
                     if jdx == 0:
                         output = (output - 0.5) / 0.5
-                        noise = noises[0, ...].unsqueeze(dim=0).expand(x.size(0), -1, -1, -1).to(x.device)
+                        noise = (
+                            noises[0, ...]
+                            .unsqueeze(dim=0)
+                            .expand(x.size(0), -1, -1, -1)
+                            .to(x.device)
+                        )
                         output = self.diffusion.q_sample(output, t, noise=noise)
 
                     output = self.forward(
-                        output, t, jdx,
-                        noises[jdx + 1].unsqueeze(dim=0).expand(x.size(0), -1, -1, -1).to(x.device)
+                        output,
+                        t,
+                        jdx,
+                        noises[jdx + 1]
+                        .unsqueeze(dim=0)
+                        .expand(x.size(0), -1, -1, -1)
+                        .to(x.device),
                     )
-            # computes gradient 
+            # computes gradient
             grad = torch.autograd.grad(output, x_in, grad_outputs=grad)[0]
 
             # breaks if schedule is empty
@@ -367,13 +416,11 @@ class ClassifierDiffusionCheckpointGradients(Attack):
         return grad
 
     def forward(self, x, t, idx, noise):
-        out = self.diffusion.p_mean_variance(
-            self.ddpm, x, t,
-            clip_denoised=True)
+        out = self.diffusion.p_mean_variance(self.ddpm, x, t, clip_denoised=True)
 
-        x = out['mean']
-        
-        if (idx != (self.steps - 1)):
+        x = out["mean"]
+
+        if idx != (self.steps - 1):
             x += torch.exp(0.5 * out["log_variance"]) * noise
 
         return x
@@ -390,25 +437,31 @@ class ClassifierDiffusionShortcut(ClassifierDiffusionCheckpointGradients):
                                 dimension equal to the length of timesteps.
         :return: a tensor of shape [batch_size, 1, ...] where the shape has K dims.
         """
-        res = torch.from_numpy(self.diffusion.sqrt_alphas_cumprod).to(device=timesteps.device)[timesteps].float()
+        res = (
+            torch.from_numpy(self.diffusion.sqrt_alphas_cumprod)
+            .to(device=timesteps.device)[timesteps]
+            .float()
+        )
         while len(res.shape) < len(broadcast_shape):
             res = res[..., None]
         return res.expand(broadcast_shape)
 
     def extract_grads(self, x, y):
-        
+
         # DDPM unconditional forward
         with torch.no_grad():
             timesteps = list(range(self.steps))[::-1]
             x = (x - 0.5) / 0.5
-            
+
             for idx, t in enumerate(timesteps):
 
                 t = torch.tensor([t] * x.size(0), device=x.device)
 
                 if idx == 0:
-                    noise = torch.randn_like(x) if self.stochastic else torch.zeros_like(x)
-                    x = self.diffusion.q_sample(x, t, noise=noise)    
+                    noise = (
+                        torch.randn_like(x) if self.stochastic else torch.zeros_like(x)
+                    )
+                    x = self.diffusion.q_sample(x, t, noise=noise)
 
                 if self.fix_noise:
                     noise = self.noise[idx + 1, ...].unsqueeze(dim=0)
@@ -441,29 +494,31 @@ class ClassifierDiffusionShortcut(ClassifierDiffusionCheckpointGradients):
 def get_attack(attack, use_checkpoint, use_shortcut=False):
 
     BaseAttack = Attack
-    post_text = ''
+    post_text = ""
     if use_checkpoint and not use_shortcut:
-        post_text = ' with checkpoint method'
+        post_text = " with checkpoint method"
         BaseAttack = ClassifierDiffusionCheckpointGradients
     elif not use_checkpoint and use_shortcut:
-        post_text = ' with shortcut method'
+        post_text = " with shortcut method"
         BaseAttack = ClassifierDiffusionShortcut
 
     class NoAttack(BaseAttack):
-        '''
+        """
         Implement no attack.
-        '''
+        """
+
         @staticmethod
         def perturb(x, y=None):
-            '''
+            """
             Returns the input instance
-            '''
+            """
             return x
 
     class PGD(BaseAttack):
-        '''
+        """
         PGD attack
-        '''
+        """
+
         def __init__(self, **kwargs):
             super().__init__(**kwargs)
             if self.loss_fn == "mse":
@@ -472,38 +527,6 @@ def get_attack(attack, use_checkpoint, use_shortcut=False):
                 self.loss_fn = torch.nn.CrossEntropyLoss()
             elif (self.loss_fn is None) and self.binary:
                 self.loss_fn = torch.nn.BCEWithLogitsLoss()
-
-        # @torch.no_grad()
-        # def attack(self, x, y):
-        #     '''
-        #     Main PGD algorithm
-        #     '''
-
-        #     x_adv = x.clone().detach()
-        #     projection_fn = self.linf_norm_proj if self.norm == 'linf' else self.l2_norm_proj
-
-        #     success = False
-        #     with tqdm(range(self.nb_iter), desc='PGD Attacking') as pbar:
-        #         for i in pbar:
-        #             grad, prediction = self.extract_grads(x_adv, y)
-        #             grad = self.sign * grad + self.extract_dist_grads(i, x, x_adv.clone().detach())
-        #             x_adv -= grad.sign() * self.step
-        #             x_adv = projection_fn(x, x_adv)
-
-        #             y_hat = self.predictor(x_adv)
-        #             confidence = get_regr_confidence(y, y_hat)
-
-        #             self.save_intermediate_img(x_adv[0], i, prediction)
-        #             pbar.set_postfix(
-        #                 confidence=confidence.item(),
-        #                 regr=prediction.item(),
-        #                 max_gpu_GB=torch.cuda.max_memory_reserved() / 1e9,
-        #             )
-        #             if confidence.item() <= self.confidence_threshold:
-        #                 success = True
-        #                 break
-
-        #     return x_adv, success, i
 
         @torch.no_grad()
         def attack(self, xs: torch.Tensor, ys: torch.Tensor):
@@ -538,12 +561,13 @@ def get_attack(attack, use_checkpoint, use_shortcut=False):
                 )
                 return attacking_mask, steps_needed
 
-            with tqdm(range(self.nb_iter), desc="PGD Attacking") as pbar:
+            with tqdm(range(self.nb_iter), desc="PGD") as pbar:
+
                 def update_pbar(attacking_mask, y_hat, confidences):
                     pbar.set_postfix(
                         confidence_mean=confidences.mean().item(),
                         regr=[f"{val:.4f}" for val in y_hat.cpu().view(-1).tolist()],
-                        attacking=attacking_mask.view(-1).int().cpu().tolist(),
+                        regr_attacking=attacking_mask.view(-1).int().cpu().tolist(),
                         max_gpu_GB=torch.cuda.max_memory_reserved() / 1e9,
                     )
 
@@ -577,9 +601,10 @@ def get_attack(attack, use_checkpoint, use_shortcut=False):
             return xs_adv, successes, steps_needed.tolist()
 
     class GradientDescent(BaseAttack):
-        '''
+        """
         GD attack. Same as PGD but without the sign function
-        '''
+        """
+
         def __init__(self, **kwargs):
             super().__init__(**kwargs)
             if (self.loss_fn is None) and (not self.binary):
@@ -589,24 +614,29 @@ def get_attack(attack, use_checkpoint, use_shortcut=False):
 
         @torch.no_grad()
         def attack(self, x, y):
-            '''
+            """
             Main GD algorithm
-            '''
+            """
 
             x_adv = x.clone().detach()
-            projection_fn = self.linf_norm_proj if self.norm == 'linf' else self.l2_norm_proj        
+            projection_fn = (
+                self.linf_norm_proj if self.norm == "linf" else self.l2_norm_proj
+            )
 
             for i in range(self.nb_iter):
-                grad = self.sign * self.extract_grads(x_adv, y) + self.extract_dist_grads(i, x, x_adv.clone().detach())
+                grad = self.sign * self.extract_grads(
+                    x_adv, y
+                ) + self.extract_dist_grads(i, x, x_adv.clone().detach())
                 x_adv -= grad * self.step
                 x_adv = projection_fn(x, x_adv)
 
             return x_adv
 
     class CW(BaseAttack):
-        '''
+        """
         C&W attack.
-        '''
+        """
+
         def __init__(self, **kwargs):
             super().__init__(**kwargs)
             if (self.loss_fn is None) and (not self.binary):
@@ -618,13 +648,15 @@ def get_attack(attack, use_checkpoint, use_shortcut=False):
 
         @torch.no_grad()
         def attack(self, x, y):
-            '''
+            """
             Main C&W algorithm
-            '''
-            assert self.targeted, 'C&W is a targeted attack'
+            """
+            assert self.targeted, "C&W is a targeted attack"
 
             x_adv = x.clone().detach()
-            projection_fn = self.linf_norm_proj if self.norm == 'linf' else self.l2_norm_proj     
+            projection_fn = (
+                self.linf_norm_proj if self.norm == "linf" else self.l2_norm_proj
+            )
 
             # instantiate w_i
             # w = torch.zeros_like(x)
@@ -635,8 +667,9 @@ def get_attack(attack, use_checkpoint, use_shortcut=False):
             for i in range(self.nb_iter):
                 # these are the gradients wrt (1 / 2) * (torch.tanh(w) + 1)
                 x_adv = (torch.tanh(w) + 1) * (self._c + 1 / 2)
-                grad = self.sign * self.extract_grads(x_adv, y) + \
-                       self.extract_dist_grads(i, x, x_adv.clone().detach())
+                grad = self.sign * self.extract_grads(
+                    x_adv, y
+                ) + self.extract_dist_grads(i, x, x_adv.clone().detach())
 
                 # manually optimize w via chain rule
                 w -= self.step * grad * (self._c + 1 / 2) * (1 - torch.tanh(w).pow(2))
@@ -644,21 +677,21 @@ def get_attack(attack, use_checkpoint, use_shortcut=False):
 
             return x_adv
 
-    print(f'Loading {attack}' + post_text)
+    print(f"Loading {attack}" + post_text)
 
-    if attack == 'None':
+    if attack == "None":
         return NoAttack
-    elif attack == 'PGD':
+    elif attack == "PGD":
         return PGD
-    elif attack == 'GD':
+    elif attack == "GD":
         return GradientDescent
-    elif attack == 'CW':
-        print('** Warning. C&W attack has no epsilon bound (except for [0, 1])!! **')
+    elif attack == "CW":
+        print("** Warning. C&W attack has no epsilon bound (except for [0, 1])!! **")
         return CW
-    elif attack == 'Adam':
+    elif attack == "Adam":
         return AdamAttack
     else:
-        raise NotImplementedError(f'Attack {attack} is not implemented.')
+        raise NotImplementedError(f"Attack {attack} is not implemented.")
 
 
 # =======================================================
@@ -667,8 +700,9 @@ def get_attack(attack, use_checkpoint, use_shortcut=False):
 
 
 class BinaryCW(torch.nn.Module):
-    
+
     relu = torch.nn.ReLU(inplace=True)
+
     def forward(self, logits, target):
         sign = torch.ones_like(target)
         sign[target == 0] = -1
@@ -678,11 +712,12 @@ class BinaryCW(torch.nn.Module):
 
 class MultiClassCW(torch.nn.Module):
     relu = torch.nn.ReLU(inplace=True)
+
     def forward(self, logits, target):
         F_t = logits[list(range(len(target))), target]
         wo_t = logits
         # replace the target for -inf to take the max
-        wo_t[list(range(len(target))), target] = -float('inf')
+        wo_t[list(range(len(target))), target] = -float("inf")
         F_c = wo_t.max(dim=1)[0]
         return self.relu(F_c - F_t).sum()
 
@@ -708,7 +743,7 @@ class AdamAttack(Attack):
             self.dist_fn = lambda x, y: 0
 
     @torch.no_grad()
-    def attack(self, x, y):
+    def attack(self, xs, ys):
         """
         Main attack algorithm
 
@@ -717,37 +752,73 @@ class AdamAttack(Attack):
         :param img_idxs: The indices of the images (used to save intermediate attack images).
         """
 
-        x_adv = x.clone().detach()
-        x_adv.requires_grad = True
+        xs_adv_list = xs.clone().detach().split(1, dim=0)
+        for x in xs_adv_list:
+            x.requires_grad_()
 
-        success = False
+        confidence_thresholds: torch.Tensor = torch.Tensor(
+            [self.confidence_threshold]
+        ).to(xs)
+        steps_needed = torch.zeros(xs.size(0), dtype=torch.int16)
 
-        optimizer = torch.optim.Adam([x_adv], lr=self.step)
-        with tqdm(range(self.nb_iter), desc="Adam Attacking") as pbar:
-            for i in pbar:
-                optimizer.zero_grad()
-                # Filter Function -> Classifier loss + Distance function
-                with torch.enable_grad():
-                    prediction = self.predict(x_adv)
-                    loss = self.loss_fn(prediction, y)
-                    dist_x = self.dist_fn(x, x_adv)
+        def track_successful_attacks(
+            i: int,
+            confidence_thresholds: torch.Tensor,
+            confidences: torch.Tensor,
+            steps_needed: torch.Tensor,
+        ):
+            successful_attacks = (confidences <= confidence_thresholds).cpu()
+            steps_needed = torch.where(
+                ~successful_attacks.view(-1),
+                i,
+                steps_needed,
+            )
+            # Update the z_sems that have reached the confidence threshold
+            for i, success in enumerate(successful_attacks):
+                if success.item():
+                    xs_adv_list[i].requires_grad = False
+
+            done = all([not x.requires_grad for x in xs_adv_list])
+            return steps_needed, done
+
+        optimizer = torch.optim.Adam(xs_adv_list, lr=self.step)
+        with tqdm(range(self.nb_iter), desc="Adam") as pbar:
+
+            def update_pbar(y_hat, confidences):
+                pbar.set_postfix(
+                    confidence_mean=confidences.mean().item(),
+                    regr=[f"{val:.4f}" for val in y_hat.cpu().view(-1).tolist()],
+                    regr_attacking=[1 if x.requires_grad else 0 for x in xs_adv_list],
+                    max_gpu_GB=torch.cuda.max_memory_reserved() / 1e9,
+                    steps_needed=steps_needed.tolist(),
+                )
+
+            with torch.enable_grad():
+                for i in pbar:
+                    # Filter Function -> Classifier loss + Distance function
+                    xs_adv = torch.cat(xs_adv_list, dim=0)
+                    y_hat = self.predict(xs_adv)
+                    loss = self.loss_fn(y_hat, ys)
+                    dist_x = self.dist_fn(xs, xs_adv)
                     total_loss = loss + dist_x
+
+                    confidences = get_regr_confidence(ys, y_hat)
+                    self.save_intermediate_img(xs_adv, i, y_hat)
+
+                    # Handle the images that have reached the confidence threshold and update mask
+                    steps_needed, done = track_successful_attacks(
+                        i,
+                        confidence_thresholds,
+                        confidences,
+                        steps_needed,
+                    )
+                    update_pbar(y_hat, confidences)
+                    if done:
+                        break
 
                     total_loss.backward()
                     optimizer.step()
+                    optimizer.zero_grad()
 
-                y_hat = self.predictor(x_adv)
-                confidence = get_regr_confidence(y, y_hat)
-
-                self.save_intermediate_img(x_adv[0], i, prediction)
-                pbar.set_postfix(
-                    confidence=confidence.item(),
-                    regr=prediction.item(),
-                    dist=dist_x.item() if dist_x != 0 else 0,
-                    max_gpu_GB=torch.cuda.max_memory_reserved() / 1e9,
-                )
-                if confidence.item() <= self.confidence_threshold:
-                    success = True
-                    break
-
-        return x_adv, success, i
+        successes: list[bool] = [not x.requires_grad for x in xs_adv_list]
+        return xs_adv, successes, steps_needed.tolist()

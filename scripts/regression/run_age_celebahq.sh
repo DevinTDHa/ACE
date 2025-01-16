@@ -40,7 +40,7 @@
 # # DATASET
 MODEL_FLAGS="--attention_resolutions 32,16,8 --class_cond False --diffusion_steps 500 --learn_sigma True --noise_schedule linear --num_channels 128 --num_head_channels 64 --num_res_blocks 2 --resblock_updown True --use_fp16 True --use_scale_shift_norm True"
 MODEL_PATH="/home/tha/ACE/pretrained/celebahq-ddpm.pt"
-RMODEL_PATH="/home/tha/master-thesis-xai/thesis_utils/scripts/train/runs/imdb_clean-256/version_0/checkpoints/last.ckpt"
+RMODEL_PATH="/home/tha/thesis_runs/regressor/imdb_wiki_densenet_linear_only-256/version_0/checkpoints/last.ckpt"
 RORACLE_PATH="/home/tha/master-thesis-xai/thesis_utils/scripts/train/runs/imdb_clean_oracle-256/version_0/checkpoints/last.ckpt"
 CONFIDENCE_THRESHOLD="0.05"
 IMAGE_FOLDER="/data/CelebAMask-HQ"
@@ -58,8 +58,11 @@ DIST_L1=${3:-0.0} # Dist does not work well, no real results if enabled
 DIST_L2=${4:-0.0}
 
 NUM_SAMPLES=20
+MAX_STEPS=100
+BATCH_SIZE=8
+
 NAME="CelebaHQ_FR-method=${ATTACK_METHOD}_step=${ATACK_STEP}_dist_l1=${DIST_L1}_dist_l2=${DIST_L2}"
-OUTPUT_PATH="ace_results/$NAME"
+OUTPUT_PATH="/home/tha/thesis_runs/ace/$NAME"
 
 echo "Runnning $NAME"
 # Run the Python script with the arguments
@@ -72,6 +75,7 @@ apptainer run \
     --model_path=$MODEL_PATH \
     --rmodel_path=$RMODEL_PATH \
     --roracle_path=$RORACLE_PATH \
+    --batch_size=$BATCH_SIZE \
     --attack_step=$ATACK_STEP \
     --confidence_threshold=$CONFIDENCE_THRESHOLD \
     --image_folder=$IMAGE_FOLDER \
@@ -80,7 +84,7 @@ apptainer run \
     --num_samples=$NUM_SAMPLES \
     --exp_name=$NAME \
     --attack_method=$ATTACK_METHOD \
-    --attack_iterations=50 \
+    --attack_iterations=$MAX_STEPS \
     --attack_joint=True \
     --dist_l1=$DIST_L1 \
     --dist_l2=$DIST_L2 \

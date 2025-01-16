@@ -58,7 +58,7 @@ DIST_L1=${3:-0.0} # Dist does not work well, no real results if enabled
 DIST_L2=${4:-0.0}
 
 TARGET=0.8
-STOP_AT=0.8
+STOP_AT=$TARGET
 NUM_SAMPLES=20
 TODAY=$(date '+%Y-%m-%d')
 NAME="method=${ATTACK_METHOD}_step=${ATACK_STEP}_l1=${DIST_L1}_l2=${DIST_L2}_t=${TARGET}_batch"

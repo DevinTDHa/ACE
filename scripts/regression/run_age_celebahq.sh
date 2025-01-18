@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=ace_celebahq
-#SBATCH --partition=gpu-7d
+#SBATCH --partition=gpu-2h
 #SBATCH --gpus-per-node=1
 #SBATCH --ntasks-per-node=4
 #SBATCH --constraint=80gb
@@ -40,15 +40,13 @@
 # # DATASET
 MODEL_FLAGS="--attention_resolutions 32,16,8 --class_cond False --diffusion_steps 500 --learn_sigma True --noise_schedule linear --num_channels 128 --num_head_channels 64 --num_res_blocks 2 --resblock_updown True --use_fp16 True --use_scale_shift_norm True"
 MODEL_PATH="/home/tha/ACE/pretrained/celebahq-ddpm.pt"
-RMODEL_PATH="/home/tha/thesis_runs/regressor/imdb_wiki_densenet_linear_only-256/version_0/checkpoints/last.ckpt"
-RORACLE_PATH="/home/tha/master-thesis-xai/thesis_utils/scripts/train/runs/imdb_clean_oracle-256/version_0/checkpoints/last.ckpt"
 CONFIDENCE_THRESHOLD="0.05"
 IMAGE_FOLDER="/data/CelebAMask-HQ"
 IMAGE_SIZE="256"
 
 # Attack parameters
-if [ "$#" -gt 4 ]; then
-    echo "Usage: $0 <attack_method=PGD> <attack_step=1.0> <dist_l1=0.0> <dist_l2=0.0>"
+if [ "$#" -gt 5 ]; then
+    echo "Usage: $0 <attack_method=PGD> <attack_step=1.0> <dist_l1=0.0> <dist_l2=0.0> <rmodel_path>"
     exit 1
 fi
 
@@ -56,13 +54,20 @@ ATTACK_METHOD=${1:-PGD}
 ATACK_STEP=${2:-1.0}
 DIST_L1=${3:-0.0} # Dist does not work well, no real results if enabled
 DIST_L2=${4:-0.0}
+RMODEL_PATH=${5:-"/home/tha/thesis_runs/regressor/imdb_wiki_densenet_linear_only-256/version_0/checkpoints/last.ckpt"}
+RORACLE_PATH="/home/tha/master-thesis-xai/thesis_utils/scripts/train/runs/imdb_clean_oracle-256/version_0/checkpoints/last.ckpt"
+if [[ "$RMODEL_PATH" == *"linear_only"* ]]; then
+    LINEAR_ONLY=1
+else
+    LINEAR_ONLY=0
+fi
 
-NUM_SAMPLES=20
-MAX_STEPS=100
+NUM_SAMPLES=100
+MAX_STEPS=150
 BATCH_SIZE=8
 
-NAME="CelebaHQ_FR-method=${ATTACK_METHOD}_step=${ATACK_STEP}_dist_l1=${DIST_L1}_dist_l2=${DIST_L2}"
-OUTPUT_PATH="/home/tha/thesis_runs/ace/$NAME"
+NAME="CelebaHQ_FR-method=${ATTACK_METHOD}-step=${ATACK_STEP}-dist_l1=${DIST_L1}-dist_l2=${DIST_L2}-rmodel_linear=${LINEAR_ONLY}"
+OUTPUT_PATH="/home/tha/thesis_runs/ace/hyperparam/$NAME"
 
 echo "Runnning $NAME"
 # Run the Python script with the arguments

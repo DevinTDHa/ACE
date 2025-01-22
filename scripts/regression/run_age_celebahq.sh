@@ -55,7 +55,7 @@ ATACK_STEP=${2:-1.0}
 DIST_L1=${3:-0.0} # Dist does not work well, no real results if enabled
 DIST_L2=${4:-0.0}
 RMODEL_PATH=${5:-"/home/tha/thesis_runs/regressor/imdb_wiki_densenet_linear_only-256/version_0/checkpoints/last.ckpt"}
-RORACLE_PATH="/home/tha/master-thesis-xai/thesis_utils/scripts/train/runs/imdb_clean_oracle-256/version_0/checkpoints/last.ckpt"
+RORACLE_PATH="/home/tha/thesis_runs/regressor/imdb_wiki_densenet_fullft-256/version_0/checkpoints/last.ckpt"
 if [[ "$RMODEL_PATH" == *"linear_only"* ]]; then
     LINEAR_ONLY=1
 else

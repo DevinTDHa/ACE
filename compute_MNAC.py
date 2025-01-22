@@ -12,7 +12,7 @@ from tqdm import tqdm
 from torch.utils import data
 from torchvision import transforms
 
-from core.attacks_and_models import Normalizer
+from models.normalizer import Normalizer
 
 from eval_utils.oracle_celeba_metrics import OracleMetrics
 from eval_utils.oracle_celebahq_metrics import OracleResnet
@@ -47,13 +47,19 @@ class CFDataset():
         self.images = []
         self.path = path
         self.exp_name = exp_name
+        
+        # DHA: Explicit resize for model
+        resize = transforms.Resize((224, 224), antialias=True)  # Model expects 224x224
         self.transform = transforms.Compose([
             transforms.ToTensor(),
+            resize,
             transforms.Normalize([0.5, 0.5, 0.5],
                                  [0.5, 0.5, 0.5])
         ])
         for CL, CF in itertools.product(['CC', 'IC'], ['CCF']):
-            self.images += [(CL, CF, I) for I in os.listdir(osp.join(path, 'Results', self.exp_name, CL, CF, 'CF'))]
+            for I in os.listdir(osp.join(path, 'Results', self.exp_name, CL, CF, 'CF')):
+                if I.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif')):
+                    self.images.append((CL, CF, I))
 
     def __len__(self):
         return len(self.images)
@@ -81,6 +87,7 @@ def compute_MNAC(oracle,
                  path,
                  exp_name,
                  batch_size):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     dataset = CFDataset(path, exp_name)
 
@@ -93,6 +100,7 @@ def compute_MNAC(oracle,
                              num_workers=4, pin_memory=True)
 
     for cl, cf in tqdm(loader):
+        breakpoint()
         d_cl = oracle(cl.to(device, dtype=torch.float))
         d_cf = oracle(cf.to(device, dtype=torch.float))
         MNACS.append(((d_cl > 0.5) != (d_cf > 0.5)).sum(dim=1).cpu().numpy())

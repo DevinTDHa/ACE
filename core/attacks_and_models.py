@@ -782,6 +782,7 @@ class AdamAttack(Attack):
             return steps_needed, done
 
         optimizer = torch.optim.Adam(xs_adv_list, lr=self.step)
+        print(f"Init Adam with step {self.step}")
         with tqdm(range(self.nb_iter), desc="Adam") as pbar:
 
             def update_pbar(y_hat, confidences):

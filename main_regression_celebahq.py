@@ -235,7 +235,13 @@ def load_model(args):
 
 def get_data(args):
     compose = default_transforms(args.image_size)
-    dataset = CelebAHQDataset(root=args.image_folder, transform=compose, get_mode="cf")
+    PARTITION_FILE = "/home/space/datasets/celeba/list_eval_partition.txt"
+    dataset = CelebAHQDataset(
+        root=args.image_folder,
+        transform=compose,
+        get_mode="cf",
+        partition_file=PARTITION_FILE,
+    )
     num_samples = (
         len(dataset)
         if args.num_samples is None

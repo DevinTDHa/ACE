@@ -359,8 +359,9 @@ def main() -> None:
     os.makedirs(mask_path, exist_ok=True)
 
     with tqdm(dataloader, desc="ACE RetinaMNIST") as pbar:
-        for x, y, targets in pbar:
+        for b_i, data in enumerate(pbar):
             # x = x.unsqueeze(0).to(dist_util.dev())
+            x, y, targets = data
             x = x.to(dist_util.dev())
             targets = targets.to(dist_util.dev()).view(-1, 1)
             x_reconstructed, y_initial = joint_classifier.initial(x)
@@ -369,8 +370,9 @@ def main() -> None:
             pbar.set_postfix_str(f"Processing: {f}")
 
             # Hack for intermediate images
+            b_i = b_i * len(x)
             image_names = [
-                str(i) for i in range(x.size(0))
+                str(b_i + i) for i in range(x.size(0))
             ]  # Use the index as the image name
             attack.current_image = image_names
             # sample image from the noisy_img

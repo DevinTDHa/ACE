@@ -42,24 +42,25 @@
 MODEL_FLAGS="" # keep all defaults?
 MODEL_PATH="/home/tha/runs/ace/retinaMNIST_ddpm/ema_0.9999_870000.pt"
 # MODEL_PATH="/home/tha/runs/ace/retinaMNIST_ddpm/model870000.pt"
-RMODEL_PATH="/home/tha/thesis_runs/regressor/retinaMNIST-128/version_0/checkpoints/last.ckpt"
+RMODEL_PATH="/home/tha/thesis_runs/regressor/retinaMNIST_reg-128/version_0/checkpoints/last.ckpt"
 RORACLE_PATH="/home/tha/thesis_runs/regressor/retinaMNIST_oracle-128/version_0/checkpoints/last.ckpt"
 IMAGE_SIZE="128"
 
 # Attack parameters
 if [ "$#" -gt 4 ]; then
-    echo "Usage: $0 <attack_method=PGD> <attack_step=1.0> <dist_l1=0.0> <dist_l2=0.0>"
+    echo "Usage: $0 <attack_method=PGD> <attack_step=2.0> <dist_l1=0.0> <dist_l2=0.0>"
     exit 1
 fi
 
 ATTACK_METHOD=${1:-PGD}
-ATACK_STEP=${2:-1.0}
+ATACK_STEP=${2:-2}
 DIST_L1=${3:-0.0} # Dist does not work well, no real results if enabled
 DIST_L2=${4:-0.0}
 CONFIDENCE_THRESHOLD="0.05"
 
-NUM_SAMPLES=20
-BATCH_SIZE=1
+NUM_SAMPLES=200
+BATCH_SIZE=24
+NUM_STEPS=200
 NAME="retinaMNIST-method=${ATTACK_METHOD}_step=${ATACK_STEP}_dist_l1=${DIST_L1}_dist_l2=${DIST_L2}"
 OUTPUT_PATH="/home/tha/thesis_runs/ace/retinaMNIST/$NAME"
 
@@ -80,7 +81,7 @@ apptainer run \
     --batch_size=$BATCH_SIZE \
     --exp_name=$NAME \
     --attack_method=$ATTACK_METHOD \
-    --attack_iterations=50 \
+    --attack_iterations=$NUM_STEPS \
     --attack_joint=True \
     --dist_l1=$DIST_L1 \
     --dist_l2=$DIST_L2 \

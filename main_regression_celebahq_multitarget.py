@@ -29,6 +29,7 @@ from thesis_utils.counterfactuals import (
     CFResult,
     save_cf_results,
     update_results_oracle,
+    generate_collage_multitarget
 )
 from thesis_utils.file_utils import (
     assert_paths_exist,
@@ -461,6 +462,12 @@ def main() -> None:
     update_results_oracle(oracle, diffeocf_results, args.confidence_threshold)
 
     save_cf_results(diffeocf_results, args.output_path)
+    
+    num_targets = len(targets)
+    num_batches = len(diffeocf_results) // num_targets
+    for b_i in range(num_batches):
+        cur_results = diffeocf_results[b_i * num_targets : (b_i + 1) * num_targets]
+        generate_collage_multitarget(args.output_path, cur_results)
 
 
 if __name__ == "__main__":

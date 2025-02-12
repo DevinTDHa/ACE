@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=ace_square
-#SBATCH --partition=gpu-2d
+#SBATCH --partition=gpu-2h
 #SBATCH --gpus-per-node=1
 #SBATCH --ntasks-per-node=4
 #SBATCH --constraint=80gb
@@ -44,16 +44,23 @@ RMODEL_PATH="/home/tha/master-thesis-xai/thesis_utils/scripts/train/runs/square3
 CONFIDENCE_THRESHOLD="0.05"
 IMAGE_SIZE="64"
 ATACK_STEP=2.0
+ATTACK_ITERATIONS=100
+BATCH_SIZE=46
+
+SQFS_FILE="/home/tha/datasets/squashed/square3_mirror.sqfs"
+if [ ! -f /tmp/data.sqfs ]; then
+    cp $SQFS_FILE /tmp/data.sqfs
+fi
 
 TARGET="mirror"
 NAME="squares_lower"
-OUTPUT_PATH="ace_results/$NAME"
-IMAGE_FOLDER="/home/tha/datasets/square3_mirrored/squares_lower/"
+OUTPUT_PATH="/home/tha/thesis_runs/ace/square3_mirror_lower"
+IMAGE_FOLDER="/data/square3/squares_lower/"
 
 echo "Runnning $NAME"
 # Run the Python script with the arguments
 apptainer run \
-    -B /home/space/datasets:/home/space/datasets \
+    -B /tmp/data.sqfs:/data/square3:image-src=/ \
     --nv \
     ~/apptainers/thesis.sif \
     python main_regression_square.py $MODEL_FLAGS \
@@ -61,21 +68,25 @@ apptainer run \
     --rmodel_path=$RMODEL_PATH \
     --attack_step=$ATACK_STEP \
     --target=$TARGET \
+    --batch_size=$BATCH_SIZE \
     --confidence_threshold=$CONFIDENCE_THRESHOLD \
     --image_folder=$IMAGE_FOLDER \
     --image_size=$IMAGE_SIZE \
     --timestep_respacing 50 \
+    --sampling_time_fraction 0.1 \
+    --sampling_dilation 5 \
+    --attack_iterations $ATTACK_ITERATIONS \
     --output_path=$OUTPUT_PATH \
     >logs/$NAME.log 2>&1 &
 
 NAME="squares_upper"
-OUTPUT_PATH="ace_results/$NAME"
-IMAGE_FOLDER="/home/tha/datasets/square3_mirrored/squares_upper/"
+OUTPUT_PATH="/home/tha/thesis_runs/ace/square3_mirror_upper"
+IMAGE_FOLDER="/data/square3/squares_upper/"
 
 echo "Runnning $NAME"
 # Run the Python script with the arguments
 apptainer run \
-    -B /home/space/datasets:/home/space/datasets \
+    -B /tmp/data.sqfs:/data/square3:image-src=/ \
     --nv \
     ~/apptainers/thesis.sif \
     python main_regression_square.py $MODEL_FLAGS \
@@ -83,10 +94,14 @@ apptainer run \
     --rmodel_path=$RMODEL_PATH \
     --attack_step=$ATACK_STEP \
     --target=$TARGET \
+    --batch_size=$BATCH_SIZE \
     --confidence_threshold=$CONFIDENCE_THRESHOLD \
     --image_folder=$IMAGE_FOLDER \
     --image_size=$IMAGE_SIZE \
     --timestep_respacing 50 \
+    --sampling_time_fraction 0.1 \
+    --sampling_dilation 5 \
+    --attack_iterations $ATTACK_ITERATIONS \
     --output_path=$OUTPUT_PATH \
     >logs/$NAME.log 2>&1 &
 

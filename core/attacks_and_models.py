@@ -155,25 +155,26 @@ class Attack:
         """
         Saves intermediate images for the attack
         """
-        if len(x.shape) == 3:
-            img_idx_path = os.path.join(self.steps_dir, self.current_image)
+        # temp disabled
+        # if len(x.shape) == 3:
+        #     img_idx_path = os.path.join(self.steps_dir, self.current_image)
 
-            y_pred_formatted = f"{y_pred.item():.3e}"
-            img_path = os.path.join(
-                img_idx_path, f"niter={n_iter:04d}_y={y_pred_formatted}.png"
-            )
+        #     y_pred_formatted = f"{y_pred.item():.3e}"
+        #     img_path = os.path.join(
+        #         img_idx_path, f"niter={n_iter:04d}_y={y_pred_formatted}.png"
+        #     )
 
-            save_img_threaded(x, img_path)
-        elif len(x.shape) == 4:
-            for i in range(x.size(0)):
-                img = x[i]
-                img_idx_path = os.path.join(self.steps_dir, self.current_image[i])
+        #     save_img_threaded(x, img_path)
+        # elif len(x.shape) == 4:
+        #     for i in range(x.size(0)):
+        #         img = x[i]
+        #         img_idx_path = os.path.join(self.steps_dir, self.current_image[i])
 
-                y_pred_formatted = f"{y_pred[i].item():.3e}"
-                img_path = os.path.join(
-                    img_idx_path, f"niter={n_iter:04d}_y={y_pred_formatted}.png"
-                )
-                save_img_threaded(img, img_path)
+        #         y_pred_formatted = f"{y_pred[i].item():.3e}"
+        #         img_path = os.path.join(
+        #             img_idx_path, f"niter={n_iter:04d}_y={y_pred_formatted}.png"
+        #         )
+        #         save_img_threaded(img, img_path)
 
     def set_dist_schedule(self, schedule):
         """

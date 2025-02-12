@@ -135,7 +135,7 @@ def create_args():
         "--output_path",
         type=str,
         required=True,
-        default="ace_results",
+        default="ace_square_results",
         help="Directory to save the results.",
     )
 
@@ -241,6 +241,13 @@ def load_model(args):
 def get_data(args):
     compose = default_transforms(args.image_size)
     dataset = SquaresDataset(root=args.image_folder, transform=compose, mask_mode=True)
+    num_samples = (
+        len(dataset)
+        if args.num_samples is None
+        else min(args.num_samples, len(dataset))
+    )
+    dataset = torch.utils.data.Subset(dataset, range(num_samples))
+
     return dataset
 
 
@@ -339,6 +346,7 @@ def main() -> None:
             and not (args.attack_joint_checkpoint or args.attack_joint_shortcut)
             else classifier
         ),
+        "predictor": classifier,
         "loss_fn": "mse",  # we can implement here a custom loss fn
         "dist_fn": dist_fn,
         "eps": args.attack_epsilon / 255,
@@ -347,7 +355,7 @@ def main() -> None:
         "binary": False,
         "step": args.attack_step / 255,
         "confidence_threshold": args.confidence_threshold,
-        "steps_dir": osp.join(result_dir, "steps"),
+        "steps_dir": osp.join(args.output_path, "steps"),
     }
 
     attack = get_attack(
@@ -371,11 +379,8 @@ def main() -> None:
         attack = attack(**attack_args)  # Constructor
 
     dataset = get_data(args)
-
-    num_samples = (
-        len(dataset)
-        if args.num_samples is None
-        else min(args.num_samples, len(dataset))
+    dataloader = torch.utils.data.DataLoader(
+        dataset, batch_size=args.batch_size, shuffle=False
     )
 
     diffeocf_results: list[CFResult] = []
@@ -389,26 +394,18 @@ def main() -> None:
     os.makedirs(noise_path, exist_ok=True)
     os.makedirs(mask_path, exist_ok=True)
 
-    with tqdm(range(num_samples), desc="Running ACE") as pbar:
-        for i in pbar:
-
-            f, _ = dataset.data[i]
-            x, y, mask = dataset[i]
-            x = x.unsqueeze(0).to(dist_util.dev())
+    with tqdm(dataloader, desc="Running ACE") as pbar:
+        for f, x, ys, mask in pbar:
+            x = x.to(dist_util.dev())
             x_reconstructed, y_initial = joint_classifier.initial(x)
 
             pbar.set_postfix_str(f"Processing: {f}")
 
             # Hack for intermediate images
-            image_name = f.split("/")[-1].split(".")[0]
-            attack.current_image = image_name
+            image_names = [f.split("/")[-1].split(".")[0] for f in f]
+            attack.current_image = image_names
 
-            target = (
-                get_experiment_targets(y).view(1, -1)
-                if args.target == "mirror"
-                else torch.Tensor([[args.target]])
-            )
-            target = target.to(dist_util.dev())
+            targets = get_experiment_targets(ys).to(dist_util.dev())
             ce, pe, noise, pe_mask, success, steps_done = filter_fn(
                 diffusion=respaced_diffusion,
                 attack=attack,
@@ -416,38 +413,40 @@ def main() -> None:
                 steps=respaced_steps,
                 x=x.to(dist_util.dev()),
                 stochastic=args.sampling_stochastic,
-                target=target,
+                target=targets[: x.size(0)],
                 inpaint=args.sampling_inpaint,
                 dilation=args.sampling_dilation,
             )
 
+            masks.append(mask.cpu())
             with torch.no_grad():
-                y_final = joint_classifier.classifier(ce).item()
-
+                y_final = joint_classifier.classifier(ce)
                 x = x.detach().cpu()
                 x_prime = ce.detach().cpu()
-                cf_result = CFResult(
-                    image_path=f,
-                    x=x,
-                    x_reconstructed=x_reconstructed,
-                    x_prime=x_prime,
-                    y_target=target.item(),
-                    y_initial_pred=y_initial,
-                    y_final_pred=y_final,
-                    success=success,
-                    steps=steps_done,
-                )
-                cf_result.update_y_true_initial(y.item())
-                diffeocf_results.append(cf_result)
-                masks.append(mask.cpu())
 
-            save_img_threaded(pe, osp.join(pe_path, cf_result.image_name))
-            save_img_threaded(noise, osp.join(noise_path, cf_result.image_name))
-            save_img_threaded(pe_mask, osp.join(mask_path, cf_result.image_name))
+                for j in range(x.size(0)):
+                    cf_result = CFResult(
+                        image_path=f[j],
+                        x=x[j].unsqueeze(0),
+                        x_reconstructed=x_reconstructed[j].unsqueeze(0),
+                        x_prime=x_prime[j].unsqueeze(0),
+                        y_target=targets[j].item(),
+                        y_initial_pred=y_initial[j].item(),
+                        y_final_pred=y_final[j].item(),
+                        success=success[j],
+                        steps=steps_done[j],
+                    )
+                    cf_result.update_y_true_initial(ys[j].item())
 
-            # Images for saving
-            # noise = (noise * 255).to(dtype=torch.uint8).detach().cpu()
-            # pe_mask = (pe_mask * 255).to(dtype=torch.uint8).detach().cpu()
+                    diffeocf_results.append(cf_result)
+
+            # save_img_threaded(pe[j], osp.join(pe_path, cf_result.image_name))
+            # save_img_threaded(
+            #     noise[j], osp.join(noise_path, cf_result.image_name)
+            # )
+            # save_img_threaded(
+            #     pe_mask[j], osp.join(mask_path, cf_result.image_name)
+            # )
 
     # Save the results for the diffeo_cf attacks
     del model
@@ -459,6 +458,7 @@ def main() -> None:
     y_ends = torch.Tensor([res.y_final_pred for res in diffeocf_results])
 
     # Update with true final predictions
+    masks = torch.cat(masks)
     update_results_true_latents(
         [inner_square_color(x_cf, mask).item() for x_cf, mask in zip(x_cfs, masks)],
         diffeocf_results,
